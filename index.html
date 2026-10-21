@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deep Space Explorer</title>
+<meta name="description" content="在程序化生成的旋臂星系中曲速跳跃、扫描未知行星，收集先驱者的信号碎片，抵达银心。">
+<meta name="theme-color" content="#02030a">
+<!-- 分享预览：og:image / twitter:image 必须是“完整网址”（见 README）。部署到 GitHub Pages 后，
+     请把下面两处 assets/thumbnail.jpg 改成 https://<用户名>.github.io/<仓库名>/assets/thumbnail.jpg -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Deep Space Explorer · 深空探险家">
+<meta property="og:description" content="曲速跳跃 · 扫描未知行星 · 解开银心信号。一个运行在浏览器里的 3D 太空探索小游戏。">
+<meta property="og:image" content="assets/thumbnail.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Deep Space Explorer · 深空探险家">
+<meta name="twitter:description" content="曲速跳跃 · 扫描未知行星 · 解开银心信号。">
+<meta name="twitter:image" content="assets/thumbnail.jpg">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2306102a'/%3E%3Ccircle cx='32' cy='32' r='10' fill='%23ffd27a'/%3E%3Cellipse cx='32' cy='32' rx='26' ry='9' fill='none' stroke='%237fd4ff' stroke-width='3' transform='rotate(-20 32 32)'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="hud" class="hidden">
+  <div id="tl"><b id="sysName">深空</b><br><span id="nearInfo"></span><br><span id="tgtInfo"></span><br><span id="tgtProbe" style="color:#b9a8ff"></span><br><span id="quest"></span></div>
+  <div id="tr"><div>信用点 <span class="cr" id="credits">0</span></div><div>已发现 <span id="discCount">0</span> 颗 · 信标 <span id="bcCount">0</span></div></div>
+  <div id="bl" class="box">
+    燃料 <span id="fuelTxt" style="float:right"></span><div class="bar" id="fuelBar"><i></i></div>
+    能量 <span id="energyTxt" style="float:right"></span><div class="bar" id="energyBar"><i></i></div>
+    速度 <span id="speedTxt" style="float:right">0 u/s</span>
+  </div>
+  <div id="br">Tab 选目标 · R 探测 · G 曲速 · M 星图 · J 日志 · U 升级 · B 辉光</div>
+  <div id="reticle"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="26"/><circle id="ring" cx="40" cy="40" r="26" transform="rotate(-90 40 40)"/></svg><div class="dot"></div></div>
+  <div id="prompt"></div>
+  <div id="labels"></div>
+  <div id="bmark" class="hidden"><b>◈</b><span id="bmarkTxt"></span></div>
+  <div id="tmark" class="hidden"><b>◆</b><span id="tmarkTxt"></span></div>
+  <div id="toasts"></div>
+  <div id="card" class="box hidden"></div>
+</div>
+<div id="warpfx"></div>
+
+<!-- 开始界面 -->
+<div id="start" class="overlay"><div class="box">
+  <h1>DEEP SPACE EXPLORER <span class="ver" id="ver"></span></h1>
+  <p>驾驶你的探索飞船穿越一座程序化生成的旋臂星系：跳跃到陌生恒星系，扫描未知行星，收集样本换取信用点，升级飞船，去往更远的深空。</p>
+  <table class="keys">
+    <tr><td>鼠标</td><td>转向（点击画面锁定鼠标，Esc 释放） · 方向键也可转向</td></tr>
+    <tr><td>W A S D</td><td>前进 / 左移 / 后退 / 右移 · <b>空格</b> 上升 · <b>C</b> 下降 · <b>Q E</b> 滚转</td></tr>
+    <tr><td>Shift</td><td>推进加速（消耗能量）</td></tr>
+    <tr><td>Tab / G</td><td>切换目标恒星 / 启动或取消曲速（消耗燃料）</td></tr>
+    <tr><td>鼠标左键 / F</td><td>瞄准行星并按住扫描</td></tr>
+    <tr><td>R</td><td>对选中的目标恒星做远程探测（消耗燃料），提前获知行星、生命与信标情报</td></tr>
+    <tr><td>M · J · U</td><td>银河星图 · 探索日志 · 飞船升级</td></tr>
+  </table>
+  <p><b style="color:var(--c2)">主线 · 银心信号：</b>银河各处散落着 7 块先驱者留下的信号碎片，每一块都会指向下一块的位置。集齐它们，抵达银河中心，扫描那颗奇点。</p>
+  <p>小贴士：靠近恒星可采集燃料；气态巨行星的扫描会补充燃料；留意金色的“◈ 信号信标”。</p>
+  <p><label><input type="checkbox" id="bloomChk"> 辉光效果（游戏中按 <b style="color:var(--c2)">B</b> 随时开关；关闭可提升性能）</label></p>
+  <div class="row"><button id="btnStart">开始探险</button><button id="btnNew">🎲 新的银河</button></div>
+  <p class="hint" id="saveHint"></p>
+</div></div>
+
+<!-- 结局 -->
+<div id="ending" class="overlay hidden"><div class="box">
+  <h1>信号解码完成</h1>
+  <p>奇点回应了你。无数星光在眼前展开——那是先驱者留下的全部星图，每一颗恒星、每一条航线都在向你敞开。</p>
+  <p>他们并没有消失，只是把这片星海托付给了下一个愿意远行的人。现在，你就是继承者。</p>
+  <p id="endStats" style="color:var(--c2)"></p>
+  <div class="row"><button id="btnEndClose">继续探索</button></div>
+  <p class="hint">银河仍然向你开放：还有大量行星、信标和升级等着你。</p>
+</div></div>
+
+<!-- 面板 -->
+<div id="journal" class="overlay hidden"><div class="box"><h2>探索日志</h2><div id="jbody"></div><p class="hint">J 或 Esc 关闭</p></div></div>
+<div id="upg" class="overlay hidden"><div class="box"><h2>飞船升级</h2><p>信用点：<b id="upgCr" style="color:var(--c2)"></b></p><div id="ubody"></div><p class="hint">U 或 Esc 关闭</p></div></div>
+<div id="mapw" class="overlay hidden"><canvas id="mapc"></canvas><div id="maphelp">银河星图 · 点击恒星设为目标，再按 R 远程探测<br>青色 = 已到访 · 紫色 = 已探测 · 灰色 = 未知<br>
+  <span style="color:#9dff9d">●</span> 生命迹象 · <span style="color:#ff9d5c">●</span> 气态巨行星 · <span style="color:#ffe27a">●</span> 未取信标 · ★ 主线信号<br>M / Esc 关闭</div>
+  <div id="mapbar"><span id="mapbarTxt">点击恒星设为目标</span><button id="btnProbe" disabled>远程探测 (R)</button></div><div id="maptip"></div></div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

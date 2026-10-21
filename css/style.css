@@ -1,0 +1,78 @@
+/* Deep Space Explorer — 界面样式 */
+:root{--c:#7fd4ff;--c2:#ffd27a;--bg:rgba(6,12,28,.66);--bd:rgba(127,212,255,.28)}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#d6e8ff;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Microsoft YaHei",monospace;user-select:none}
+canvas{display:block}
+.hidden{display:none!important}
+.box{background:var(--bg);backdrop-filter:blur(8px);border:1px solid var(--bd);border-radius:10px;padding:10px 14px}
+
+/* HUD */
+#hud{position:fixed;inset:0;pointer-events:none;font-size:12.5px}
+#tl{position:absolute;left:16px;top:14px;line-height:1.7}
+#tl b{color:#fff;font-size:15px;letter-spacing:.08em}
+#tr{position:absolute;right:16px;top:14px;text-align:right;line-height:1.7}
+#tr .cr{color:var(--c2);font-size:17px}
+#bl{position:absolute;left:16px;bottom:16px;width:230px}
+.bar{height:7px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;margin:3px 0 9px}
+.bar i{display:block;height:100%;width:50%;background:var(--c)}
+#energyBar i{background:#9dff9d}
+#br{position:absolute;right:16px;bottom:16px;text-align:right;opacity:.5;line-height:1.6;font-size:11.5px}
+#reticle{position:absolute;left:50%;top:50%;width:80px;height:80px;margin:-40px 0 0 -40px;opacity:.5;transition:opacity .15s}
+#reticle.hit{opacity:1}
+#reticle svg{position:absolute;inset:0}
+#reticle circle{fill:none;stroke:var(--c);stroke-width:1.5;opacity:.5}
+#ring{stroke-width:3!important;opacity:1!important;stroke:var(--c2)!important;stroke-dasharray:163.4;stroke-dashoffset:163.4}
+#reticle .dot{position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px;background:var(--c);border-radius:50%}
+#prompt{position:absolute;left:50%;bottom:72px;transform:translateX(-50%);text-align:center;font-size:14px;
+  text-shadow:0 0 8px #000;white-space:nowrap}
+#prompt .k{color:var(--c2)}
+#labels div{position:absolute;left:0;top:0;font-size:11.5px;color:var(--c);white-space:nowrap;text-shadow:0 0 6px #000;
+  transform:translate(-50%,0);line-height:1.35;text-align:center}
+#labels div.ok{color:#9dff9d}
+#labels div.bc{color:#ffe27a}
+#labels div.st{color:#6ee7ff;font-weight:700}
+#quest{color:var(--c2)}
+#tmark{position:absolute;left:0;top:0;color:var(--c2);font-size:12px;text-align:center;text-shadow:0 0 6px #000;
+  transform:translate(-50%,-50%);white-space:nowrap}
+#tmark b{display:block;font-size:20px;line-height:1}
+#bmark{position:absolute;left:0;top:0;color:#6ee7ff;font-size:12px;text-align:center;text-shadow:0 0 6px #000;
+  transform:translate(-50%,-50%);white-space:nowrap}
+#bmark b{display:block;font-size:20px;line-height:1}
+#toasts{position:absolute;left:50%;top:70px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px}
+.toast{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:6px 14px;font-size:13px;
+  animation:fade 4.2s forwards}
+.toast.good{border-color:#9dff9d;color:#d9ffd9}
+.toast.warn{border-color:#ff9d7a;color:#ffd9cc}
+@keyframes fade{0%{opacity:0;transform:translateY(-6px)}8%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
+#card{position:absolute;right:16px;top:110px;width:230px;line-height:1.7;animation:slide .35s}
+@keyframes slide{from{opacity:0;transform:translateX(20px)}}
+#card h3{margin:0 0 4px;color:#fff;font-size:14px}
+#card .v{color:var(--c2)}
+#warpfx{position:fixed;inset:0;pointer-events:none;opacity:0;
+  background:radial-gradient(ellipse at center,rgba(0,0,0,0) 30%,rgba(90,170,255,.55) 100%)}
+
+/* overlays */
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,6,.72);z-index:20}
+.overlay .box{max-width:720px;width:min(92vw,720px);max-height:86vh;overflow:auto;padding:22px 26px;background:rgba(8,14,32,.9)}
+.overlay h1{margin:0 0 4px;letter-spacing:.18em;font-size:26px;color:#fff}
+.overlay h2{margin:0 0 12px;letter-spacing:.12em;color:#fff}
+.overlay p{opacity:.8;line-height:1.7;margin:6px 0}
+.overlay table{border-collapse:collapse;width:100%;font-size:12.5px}
+.overlay td,.overlay th{padding:4px 8px;border-bottom:1px solid rgba(127,212,255,.15);text-align:left}
+.overlay th{color:var(--c);font-weight:600}
+.keys td:first-child{color:var(--c2);white-space:nowrap;width:130px}
+button{font:inherit;color:#d6e8ff;background:rgba(80,130,230,.22);border:1px solid var(--bd);border-radius:7px;
+  padding:8px 16px;cursor:pointer}
+button:hover:not(:disabled){background:rgba(110,160,255,.45);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+.row{display:flex;gap:10px;margin-top:14px}
+.hint{opacity:.5;font-size:11.5px;margin-top:12px!important}
+.pips{letter-spacing:3px;color:var(--c2)}
+#mapw{padding:0;background:rgba(0,0,8,.88)}
+#mapc{width:100%;height:100%}
+#maptip{position:absolute;pointer-events:none;background:var(--bg);border:1px solid var(--bd);border-radius:6px;
+  padding:5px 9px;font-size:12px;line-height:1.5;display:none}
+#maphelp{position:absolute;left:16px;top:14px;font-size:12px;opacity:.75;line-height:1.7}
+#mapbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
+  background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:8px 14px;font-size:12.5px;max-width:92vw}
+.ver{font-size:12px;letter-spacing:.1em;opacity:.55;margin-left:8px;font-weight:400;vertical-align:middle}
