@@ -32,16 +32,22 @@ export function genBackground(R,n=7000){
   }
   return {pos,col};
 }
+
+// 生成星云，返回[{p:[x,y,z],s:scale,c:[r,g,b],o:opacity},...]
 export function genNebulae(R,count=14){
   const pal=[[.9,.25,.55],[.3,.45,1],[.55,.3,.95],[.2,.85,.8],[1,.55,.25]],out=[];
   for(let i=0;i<count;i++){
     const r=GR*R.uni(.2,1.1),a=R.uni(0,TAU),cx=Math.cos(a)*r,cy=R.gauss(0,20),cz=Math.sin(a)*r,color=R.pick(pal);
-    for(let j=0;j<26;j++)out.push({p:[cx+R.gauss(0,38),cy+R.gauss(0,14),cz+R.gauss(0,38)],
-      s:R.uni(50,150),c:color.map(v=>Math.min(1,v*R.uni(.8,1.15))),o:R.uni(.05,.14)});
+    for(let j=0;j<26;j++)out.push({
+      p:[cx+R.gauss(0,38),cy+R.gauss(0,14),cz+R.gauss(0,38)],
+      s:R.uni(50,150),
+      c:color.map(v=>Math.min(1,v*R.uni(.8,1.15))),
+      o:R.uni(.02,.06) // opacity
+    });
   }
   return out;
 }
-export function genSystems(R,gal,count=64){
+export function genSystems(R,gal,count=45){
   const list=[],names=new Set();
   const mk=(pos,home)=>{
     let name;
@@ -58,7 +64,7 @@ export function genSystems(R,gal,count=64){
     const k=R.int(0,N-1),x=gal.pos[k*3],y=gal.pos[k*3+1],z=gal.pos[k*3+2],r=Math.hypot(x,z);
     if(r<80||r>GR*.95)continue;
     const p=new THREE.Vector3(x,y*.3,z);
-    if(list.some(s=>s.pos.distanceTo(p)<45))continue;
+    if(list.some(s=>s.pos.distanceTo(p)<150))continue;
     mk([x,y*.3,z],false);
   }
   return list;
