@@ -1,6 +1,6 @@
 {
   "name": "deep-space-explorer",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Procedurally generated spiral-galaxy space exploration game (Three.js, ES modules, no build step).",
   "private": true,
   "type": "module",
