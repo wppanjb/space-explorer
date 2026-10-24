@@ -77,7 +77,7 @@ composer.addPass(bloom); composer.addPass(new OutputPass());
 
 
 scene.add(pointCloud(BG, 14));
-scene.add(pointCloud(GAL, 2.2, .6));
+scene.add(pointCloud(GAL, 2.2, .6, 150));
 for (const n of NEB) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
     map: soft, color: new THREE.Color(...n.c), opacity: n.o,
@@ -117,15 +117,16 @@ const markers = systems.map(s => {
 });
 
 // 飞行尘埃
-const DUST_N = 700, DUST_R = 100, dustPos = new Float32Array(DUST_N * 3);
+const DUST_N = 200, DUST_R = 100, dustPos = new Float32Array(DUST_N * 3);
 for (let i = 0; i < DUST_N * 3; i++)dustPos[i] = (Math.random() - .5) * DUST_R * 2;
 const dustGeo = new THREE.BufferGeometry(); dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
 const dust = new THREE.Points(dustGeo,
   new THREE.PointsMaterial({
-    size: .35, map: soft, color: 0x9fc4ff, transparent: true, opacity: .6,
+    size: .15, map: soft, color: 0xc8d4e8, transparent: true, opacity: .3,
     depthWrite: false, blending: THREE.AdditiveBlending
   })
 );
+
 dust.frustumCulled = false; scene.add(dust);
 
 // =====================================================================
@@ -774,11 +775,12 @@ function renderUpg() {
 
 const mapc = $('mapc'), tip = $('maptip'); let mapS = 1, mapCX = 0, mapCY = 0, mapHover = null;
 const mx = x => mapCX + x * mapS, my = z => mapCY + z * mapS;
+
 function drawMap() {
   const W = mapc.width = innerWidth, H = mapc.height = innerHeight, g = mapc.getContext('2d');
   mapS = Math.min(W, H) * .44 / (GR * 1.05); mapCX = W / 2; mapCY = H / 2;
   g.fillStyle = 'rgba(140,170,255,.22)';
-  for (let i = 0; i < GAL.pos.length; i += 36)g.fillRect(mx(GAL.pos[i]), my(GAL.pos[i + 2]), 1.3, 1.3);
+  for (let k = 0; k < GAL.pos.length / 3; k += 13) g.fillRect(mx(GAL.pos[k*3]), my(GAL.pos[k*3 + 2]), 1.3, 1.3);
   g.fillStyle = '#ffb060'; g.beginPath(); g.arc(mx(0), my(0), 5, 0, TAU); g.fill();
   if (target) {
     g.strokeStyle = 'rgba(255,210,122,.5)'; g.setLineDash([5, 5]); g.beginPath();

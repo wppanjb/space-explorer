@@ -22,10 +22,25 @@ export function planetTexture(p){
       g.beginPath();g.ellipse(rng()*W,rng()*H,10+rng()*40,2+rng()*5,0,0,7);g.fill()}
   }
   const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t}
-export function pointCloud(d,size,opacity=1){
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.BufferAttribute(d.pos,3));
-  geo.setAttribute('color',new THREE.BufferAttribute(d.col,3));
-  const pts=new THREE.Points(geo,new THREE.PointsMaterial({size,map:soft,vertexColors:true,transparent:true,
-    opacity,depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true}));
-  pts.frustumCulled=false;return pts}
+export function pointCloud(d, size, opacity = 1, fadeNear = 0, atten = true) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(d.pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(d.col, 3));
+  const mat = new THREE.PointsMaterial({
+    size, map: soft, vertexColors: true, transparent: true,
+    opacity, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: atten
+  });
+  if (fadeNear > 0) {
+    mat.onBeforeCompile = sh => {
+      sh.vertexShader = sh.vertexShader
+        .replace('void main() {', 'varying float vDist;\nvoid main() {')
+        .replace('#include <project_vertex>', '#include <project_vertex>\n  vDist = -mvPosition.z;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('void main() {', 'varying float vDist;\nvoid main() {')
+        .replace('#include <alphatest_fragment>',
+          '#include <alphatest_fragment>\n  diffuseColor.a *= smoothstep(' + fadeNear.toFixed(1) + ', ' + (fadeNear * 2.5).toFixed(1) + ', vDist);');
+    };
+  }
+  const pts = new THREE.Points(geo, mat);
+  pts.frustumCulled = false; return pts;
+}
