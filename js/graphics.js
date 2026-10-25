@@ -8,6 +8,13 @@ function softTexture(){
   gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.3,'rgba(255,255,255,.35)');gr.addColorStop(1,'rgba(255,255,255,0)');
   g.fillStyle=gr;g.fillRect(0,0,128,128);return new THREE.CanvasTexture(c)}
 export const soft=softTexture();
+// 恒星本体用的“正圆盘”贴图：边缘锐利，Sprite 永远朝向镜头，所以在画面边缘也不会被拉成椭圆
+export const disc = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.95, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c);
+})();
 export function planetTexture(p){
   const rng=mulberry32(p.seed),W=512,H=256,c=document.createElement('canvas');c.width=W;c.height=H;
   const g=c.getContext('2d'),[A,B]=p.palette.map(v=>v.map(x=>Math.round(x*255)));

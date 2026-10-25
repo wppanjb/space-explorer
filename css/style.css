@@ -76,3 +76,11 @@ button:disabled{opacity:.4;cursor:default}
 #mapbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
   background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:8px 14px;font-size:12.5px;max-width:92vw}
 .ver{font-size:12px;letter-spacing:.1em;opacity:.55;margin-left:8px;font-weight:400;vertical-align:middle}
+/* 行星收藏卡 */
+#cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+#cgrid img{width:100%;border-radius:10px;cursor:pointer;transition:transform .15s}
+#cgrid img:hover{transform:translateY(-3px)}
+#cardbig{z-index:30}
+#cardbig img{max-height:80vh;max-width:90vw;border-radius:16px}
+.btnlink{display:inline-block;padding:8px 14px;border:1px solid var(--bd);border-radius:8px;color:#fff;text-decoration:none;cursor:pointer}
+#card{max-height:calc(100vh - 130px);overflow:auto}

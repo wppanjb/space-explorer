@@ -7,10 +7,12 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 import { VERSION, TAU, GR, ROMAN, STAR_COLS, SAVE_KEY, FRAG_N, FRAG_TEXT, LIFE_BONUS } from './constants.js';
 import { mulberry32, makeRng, lerp } from './rng.js';
-import { genGalaxy, genBackground, genNebulae, genSystems, genPlanets } from './universe.js';
+import { genGalaxy, genBackground, genNebulae, genSystems, genPlanets, genStars } from './universe.js';
 import { genFragments, fragKind } from './story.js';
 import { beep } from './audio.js';
-import { soft, planetTexture, pointCloud } from './graphics.js';
+import { soft, disc, planetTexture, pointCloud } from './graphics.js';
+import { drawPlanetCard } from './cards.js';
+
 
 const $ = id => document.getElementById(id);
 
@@ -113,7 +115,7 @@ const markers = systems.map(s => {
     map: soft, color: new THREE.Color(...s.color), opacity: 1,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
   }));
-  sp.position.copy(s.pos); sp.scale.setScalar(14); scene.add(sp); return sp
+  sp.position.copy(s.pos); sp.scale.setScalar(14 + 5 * (genStars(s).length - 1)); scene.add(sp); return sp
 });
 
 // 飞行尘埃
@@ -136,7 +138,16 @@ const UP = new THREE.Vector3(0, 1, 0);
 const ship = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), vel: new THREE.Vector3() };
 if (save?.pos) { ship.pos.fromArray(save.pos); ship.quat.fromArray(save.quat) }
 else {
-  const h = systems[0]; ship.pos.copy(h.pos).add(new THREE.Vector3(0, 25, 140));
+  const h = systems[0], RR = 100;
+  let best = null, bm = -1e9;
+  for (let a = 0; a < 360; a += 10) {
+    const r = a * Math.PI / 180;
+    const p = new THREE.Vector3(Math.sin(r) * RR, 20, Math.cos(r) * RR).add(h.pos);
+    let other = 1e9;
+    for (const s of systems) if (s !== h) other = Math.min(other, s.pos.distanceTo(p));
+    if (other - RR > bm) { bm = other - RR; best = p }   // 其他恒星比家园恒星远多少，越大越好
+  }
+  ship.pos.copy(best);
   ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(ship.pos, h.pos, UP));
 }
 
@@ -163,33 +174,32 @@ function beaconSpot(sys, R, rMax) {
   return best;
 }
 
+function solveE(M, e) { let E = M; for (let k = 0; k < 6; k++)E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E)); return E }
+const orbitPos = (p, E, out) => out.set(p.dist * (Math.cos(E) - p.ecc), 0, -p.dist * Math.sqrt(1 - p.ecc * p.ecc) * Math.sin(E));
 function buildSystem(sys) {
   const g = new THREE.Group(); g.position.copy(sys.pos); scene.add(g);
   const sc = new THREE.Color(...sys.color);
-  const star = new THREE.Mesh(
-    new THREE.SphereGeometry(sys.radius, 48, 48),
-    new THREE.MeshBasicMaterial({ color: sc })
-  );
-  g.add(star);   // ← 加上这一行  
-
-  // 恒星的光晕
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: soft,
-    color: sc,
-    opacity: .9,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
-  }));
-  glow.scale.setScalar(sys.radius * 6);
-  star.add(glow);
-  const light = new THREE.PointLight(sc, 4, 0, 0); g.add(light);   // 同时只有一个星系的光源亮着（见主循环），避免叠加过亮
-
+  const stars = genStars(sys).map((st, k) => {
+    const col = new THREE.Color(...st.color);
+    const mesh = new THREE.Group(); g.add(mesh);   // 一颗恒星 = 一个组：圆盘 + 光晕
+    const body = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: col, depthWrite: false }));
+    body.scale.setScalar(st.radius * 2); body.renderOrder = k * 2 + 1; mesh.add(body);   // 圆盘盖在自己的光晕上面
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: soft, color: col, opacity: .9, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    glow.scale.setScalar(st.radius * 6); glow.renderOrder = k * 2; mesh.add(glow);
+    const light = new THREE.PointLight(col, k === 0 ? 4 : 2.4, 0, 0); g.add(light);
+    return { st, mesh, light, base: k === 0 ? 4 : 2.4, label: k > 0 ? mkLabel() : null };
+  });
+  const star = stars[0].mesh, light = stars[0].light;   // 兼容原有代码
   const orbits = [], planets = genPlanets(sys).map(p => {
     const pivot = new THREE.Group(); g.add(pivot);
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.radius, 48, 48),
       new THREE.MeshStandardMaterial({ map: planetTexture(p), roughness: .9, metalness: 0 }));
-    mesh.position.x = p.dist; mesh.rotation.z = p.tilt; pivot.add(mesh);
+    orbitPos(p, solveE(p.phase, p.ecc), mesh.position);
+    mesh.rotation.z = p.tilt; pivot.add(mesh);
+    pivot.rotation.set(p.inc, p.node, 0, 'YXZ');
     if (p.ring) {
       const r = new THREE.Mesh(new THREE.RingGeometry(p.radius * 1.5, p.radius * 2.5, 96),
         new THREE.MeshBasicMaterial({ color: new THREE.Color(...p.palette[1]), transparent: true, opacity: .55, side: THREE.DoubleSide }));
@@ -202,12 +212,15 @@ function buildSystem(sys) {
         new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 1 }));
       m.position.x = p.radius * (2.2 + i * .9); mp.add(m); moons.push({ pivot: mp, speed: 2.5 / (1 + i * .6) })
     }
-    const pts = []; for (let i = 0; i <= 256; i++) { const a = i / 256 * TAU; pts.push(new THREE.Vector3(Math.cos(a) * p.dist, 0, Math.sin(a) * p.dist)) }
+    const pts = []; for (let i = 0; i <= 256; i++) {
+      const a = i / 256 * TAU;
+      pts.push(orbitPos(p, a, new THREE.Vector3()))
+    }
     const orbitLine = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({ color: 0x4466aa, transparent: true, opacity: .3 }));
+    orbitLine.rotation.copy(pivot.rotation);
     g.add(orbitLine); orbits.push(orbitLine);
-    pivot.rotation.y = p.phase;
-    return { p, pivot, mesh, moons, label: mkLabel() };
+    return { p, pivot, mesh, moons, label: mkLabel(), M: p.phase };
   });
 
   let belt = null;
@@ -241,7 +254,7 @@ function buildSystem(sys) {
   }
   // 主线信标：如果当前主线要求寻找信标，且它在本星系，则额外生成一个
   // Add fade=0 属性，便于在主线推进后补建时淡入显示
-  const S = { sys, group: g, star, planets, belt, beacons, light, orbits, fade: 0 };
+  const S = { sys, group: g, star, stars, planets, belt, beacons, light, orbits, fade: 0, t: 0 };
   addStoryBeacon(S);
   return S;
 }
@@ -263,7 +276,7 @@ function addStoryBeacon(S) {
 function fadeSystem(S, k) {
   S.group.traverse(o => {
     const m = o.material; if (!m) return;
-    if (o === S.star || o.parent === S.star) return;   // 恒星本体和它的光晕不淡入    
+    if (S.stars.some(s => o === s.mesh || o.parent === s.mesh)) return;
     if (m.userData.base === undefined) {            // 第一次遇到：记下原始透明度和原始 transparent 设置
       m.userData.base = m.opacity;
       m.userData.t0 = m.transparent;
@@ -279,7 +292,7 @@ function disposeSystem(s) {
     const m = o.material; if (m) { m.map?.dispose(); m.dispose() }
   });
   scene.remove(s.group);
-  s.planets.forEach(p => p.label.remove()); s.beacons.forEach(b => b.label.remove());
+  s.planets.forEach(p => p.label.remove()); s.beacons.forEach(b => b.label.remove()); s.stars.forEach(x => x.label?.remove());
 }
 // 加载规则：同一时刻最多两个星系——
 //  ① 主星系：离玩家最近的恒星所在星系（与最初版本相同，带迟滞，不会来回闪烁）
@@ -336,18 +349,19 @@ function updateLOD() {
 // 输入
 // =====================================================================
 const keys = {}; let mouseDX = 0, mouseDY = 0, mouseHeld = false, running = false, openP = null;
-const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending') };
-const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending';
+const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards') };
+const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards';
 addEventListener('keydown', e => {
   if (!running) return;
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (e.repeat) return;
   keys[e.code] = true;
-  if (e.code === 'Escape') { if (openP) closePanel(); return }
+  if (e.code === 'Escape') { if (!$('cardbig').classList.contains('hidden')) { $('cardbig').classList.add('hidden'); return } if (openP) closePanel(); return };
   if (e.code === 'KeyB') toggleBloom();
   if (e.code === 'KeyM') openPanel('map');
   if (e.code === 'KeyJ') openPanel('journal');
   if (e.code === 'KeyU') openPanel('upg');
+  if (e.code === 'KeyK') openPanel('cards');
   if (paused()) return;
   if (e.code === 'Tab') cycleTarget();
   if (e.code === 'KeyR') probeTarget();
@@ -380,7 +394,7 @@ function openPanel(n) {
   if (openP === n) { closePanel(); return }
   closePanel(); openP = n; panels[n].classList.remove('hidden');
   document.exitPointerLock?.(); mouseHeld = false;
-  if (n === 'journal') renderJournal(); if (n === 'upg') renderUpg();
+  if (n === 'journal') renderJournal(); if (n === 'cards') renderCards(); if (n === 'upg') renderUpg();
 }
 function closePanel() { if (openP) { panels[openP].classList.add('hidden'); openP = null } }
 
@@ -391,11 +405,27 @@ function toast(msg, cls = '') {
   while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
 }
 let cardTimer = 0;
+const cardCache = new Map();
+function cardURL(p) {
+  if (!cardCache.has(p.id)) cardCache.set(p.id, drawPlanetCard(p, genStars(systems[+p.id.split(':')[0]])).toDataURL('image/png'));
+  return cardCache.get(p.id);
+}
+function renderCards() {
+  const ids = [...discovered].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
+  $('cgrid').innerHTML = ids.length ? ids.map(id => {
+    const [si, pi] = id.split(':').map(Number), p = genPlanets(systems[si])[pi];
+    return `<img src="${cardURL(p)}" alt="${p.name}">`
+  }).join('') : '<p>还没有收藏。扫描行星后，它的卡片会出现在这里。</p>';
+  $('cgrid').querySelectorAll('img').forEach(im => im.onclick = () => {
+    $('cardimg').src = im.src; $('cardDl').href = im.src; $('cardDl').download = im.alt + '.png'; $('cardbig').classList.remove('hidden')
+  });
+}
+$('cardClose').onclick = () => $('cardbig').classList.add('hidden');
+$('cardbig').onclick = e => { if (e.target === $('cardbig')) $('cardbig').classList.add('hidden') };
 function showCard(p, isNew) {
   const i = p.info, c = $('card');
-  c.innerHTML = `<h3>${p.name}</h3>类型：${({ rock: '岩石行星', gas: '气态巨行星', ice: '冰巨星' })[p.kind]}<br>
-    大气：${i.atm}<br>温度：${i.temp} °C<br>重力：${i.g} g<br>资源：${i.res}<br>生命：<span class="v">${i.life}</span><br>
-    ${isNew ? `<span class="v">+${i.value} 信用点 · +${i.fuelGain} 燃料</span>` : '已记录'}`;
+  c.innerHTML = `<img src="${cardURL(p)}" style="width:100%;border-radius:10px;display:block;margin-bottom:6px">` +
+    (isNew ? `<span class="v">+${i.value} 信用点 · +${i.fuelGain} 燃料 · 已收藏</span>` : '已收藏');
   c.classList.remove('hidden'); clearTimeout(cardTimer); cardTimer = setTimeout(() => c.classList.add('hidden'), 7000);
 }
 
@@ -441,7 +471,8 @@ function sysSummary(s) {
   const unseen = ps.filter(p => !discovered.has(p.id)), value = unseen.reduce((a, p) => a + p.info.value, 0);
   const R2 = makeRng(s.seed + 777), nb = s.i === 0 ? 1 : R2.int(1, 2); let bc = 0;
   for (let k = 0; k < nb; k++)if (!beaconsGot.has(s.i + ':b' + k)) bc++;
-  const type = STAR_TYPES[Math.max(0, STAR_COLS.indexOf(s.color))], quest = frags < FRAG_N && fragSys[frags] === s.i;
+  const type = STAR_TYPES[Math.max(0, STAR_COLS.indexOf(s.color))] + ['', '（双星系统）', '（三星系统）'][genStars(s).length - 1],
+    quest = frags < FRAG_N && fragSys[frags] === s.i;
   return {
     type, n: ps.length, gas, life: lifeList.length, best, value, bc, quest,
     short: `${type} · 行星${ps.length} 气态${gas} 生命${lifeList.length} 信标${bc}${quest ? ' · ★先驱者信号' : ''}`,
@@ -492,11 +523,12 @@ function questText() {
   if (here && sb) return `主线 ${frags}/${FRAG_N}：飞向青色信号碎片信标 ◈（${Math.round(qV.copy(sb.local).add(s.pos).distanceTo(ship.pos))} u）`;
   return `主线 ${frags}/${FRAG_N}：前往 ${s.name}（${Math.round(s.pos.distanceTo(ship.pos))} u），寻找信号碎片信标`;
 }
-function collectFragment() {
+function collectFragment(keep = false) {
   const k = frags; frags++; credits += 200;
   [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
   const c = $('card');
-  c.innerHTML = `<h3>信号碎片 ${frags}/${FRAG_N}</h3><span class="v">+200 信用点</span><br>${FRAG_TEXT[k]}`;
+  const html = `<h3>信号碎片 ${frags}/${FRAG_N}</h3><span class="v">+200 信用点</span><br>${FRAG_TEXT[k]}`;
+  c.innerHTML = keep ? c.innerHTML + '<hr style="border:0;border-top:1px solid rgba(127,212,255,.25);margin:8px 0">' + html : html;
   c.classList.remove('hidden'); clearTimeout(cardTimer); cardTimer = setTimeout(() => c.classList.add('hidden'), 12000);
   toast(frags >= FRAG_N ? '七块碎片已集齐 —— 信号指向银心奇点' : `信号碎片 ${frags}/${FRAG_N} · 新的坐标已标记`, 'good');
   loaded.forEach(addStoryBeacon);   // 下一块碎片的星系若已加载，立即补建信标
@@ -526,7 +558,7 @@ function completeScan(c) {
   } else beep(500, .1);
   showCard(p, isNew);
   // 主线：当前碎片对应的异常行星（即使之前已扫描过，再扫一次也能取得碎片）
-  if (frags < FRAG_N && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags)) collectFragment();
+  if (frags < FRAG_N && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags)) collectFragment(true);
 }
 
 // =====================================================================
@@ -590,13 +622,20 @@ function update(dt) {
     if (L.fade < 1) { L.fade = Math.min(1, L.fade + dt / 1.5); fadeSystem(L, L.fade); }
     // 最近的星系完整显示；若同时存在另一个星系，它只显示恒星和主线目标，避免轨道/行星互相重叠
     const full = L === cur;
-    L.light.intensity = full ? 4 : 0;
+    L.t += dt;
+    for (const s of L.stars) {
+      const a = s.st.phase + L.t * s.st.speed;
+      s.mesh.position.set(Math.cos(a) * s.st.orbitR, 0, Math.sin(a) * s.st.orbitR);
+      s.light.position.copy(s.mesh.position);
+      s.light.intensity = full ? s.base : 0;
+    }
     for (const o of L.orbits) o.visible = full;
     if (L.belt) L.belt.visible = full;
     for (const b of L.beacons) b.mesh.visible = full || !!b.story;
     for (const pl of L.planets) { pl.show = full || isQuestPlanet(pl.p); pl.pivot.visible = pl.show }
     for (const pl of L.planets) {
-      pl.pivot.rotation.y += dt * TAU / pl.p.period / 6; pl.mesh.rotation.y += dt * .4;
+      pl.M += dt * TAU / pl.p.period / 6 * pl.p.dir; orbitPos(pl.p, solveE(pl.M, pl.p.ecc), pl.mesh.position);
+      pl.mesh.rotation.y += dt * .4;
       for (const m of pl.moons) m.pivot.rotation.y += dt * m.speed;
       if (!warp && pl.show) {
         pl.mesh.getWorldPosition(tV); tV2.copy(ship.pos).sub(tV); const rr = pl.p.radius + 2.5, d = tV2.length();
@@ -607,13 +646,17 @@ function update(dt) {
       }
     }
     if (L.belt) L.belt.rotation.y += dt * .03;
-    L.star.rotation.y += dt * .1;
-    const sp = L.sys.pos, sd = ship.pos.distanceTo(sp), sr = L.sys.radius;
-    if (!warp && sd < sr * 1.5 + 2) {
-      tV2.copy(ship.pos).sub(sp).normalize(); ship.pos.copy(sp).addScaledVector(tV2, sr * 1.5 + 2);
-      const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2)
+    const sp = L.sys.pos;
+    for (const s of L.stars) {
+      s.mesh.rotation.y += dt * .1;
+      tV.copy(s.mesh.position).add(sp);                 // 这颗恒星的世界坐标
+      const sd = ship.pos.distanceTo(tV), sr = s.st.radius;
+      if (!warp && sd < sr * 1.5 + 2) {
+        tV2.copy(ship.pos).sub(tV).normalize(); ship.pos.copy(tV).addScaledVector(tV2, sr * 1.5 + 2);
+        const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2);
+      }
+      if (sd < sr * 4.5 && fuel < fuelMax()) { fuel = Math.min(fuelMax(), fuel + 6 * dt); scooping = true }
     }
-    if (sd < sr * 4.5 && fuel < fuelMax()) { fuel = Math.min(fuelMax(), fuel + 6 * dt); scooping = true }
     // 信标
     for (let i = L.beacons.length - 1; i >= 0; i--) {
       const b = L.beacons[i]; b.mesh.rotation.y += dt * 1.2; b.mesh.rotation.x += dt * .6;
@@ -677,7 +720,7 @@ function updateHUD() {
   $('energyTxt').textContent = boostLock ? '过热' : `${energy.toFixed(0)}/${energyMax()}`;
   $('energyBar').firstElementChild.style.width = energy / energyMax() * 100 + '%';
   $('speedTxt').textContent = ship.vel.length().toFixed(0) + ' u/s' + (warp ? ' · 曲速' : '');
-  $('sysName').textContent = cur && cur.sys._d < 220 ? cur.sys.name + ' 星系' : '深空';
+  $('sysName').textContent = cur && cur.sys._d < 220 ? cur.sys.name + ' 星系' + ['', '（双星）', '（三星）'][genStars(cur.sys).length - 1] : '深空';
   $('nearInfo').textContent = `最近恒星：${nearest.name} · ${Math.round(nearestDist)} u`;
   $('tgtInfo').textContent = target ? `目标：${target.name} · ${Math.round(target.pos.distanceTo(ship.pos))} u · 曲速 -${warpCost(target).toFixed(0)} 燃料` : '目标：无（Tab 选择）';
 
@@ -714,6 +757,14 @@ function updateHUD() {
       b.label.style.display = 'block'; b.label.style.transform = `translate(${s.x}px,${s.y + 16}px) translate(-50%,0)`;
       b.label.innerHTML = (b.story ? '◈ 信号碎片' : '◈ 信号信标') + `<br>${Math.round(d)} u`;
     }
+    L.stars.forEach((x, k) => {   // 伴星标签：方便找到远处的第二、第三颗太阳
+      if (!x.label) return;
+      tV.copy(x.mesh.position).add(L.sys.pos); const d = tV.distanceTo(ship.pos), sc = toScreen(tV);
+      if (sc.behind || d > 600 || warp) { x.label.style.display = 'none'; return }
+      x.label.style.display = 'block';
+      x.label.style.transform = `translate(${sc.x}px,${sc.y + x.st.radius * 620 / d + 12}px) translate(-50%,0)`;
+      x.label.innerHTML = `伴星 ${'ABC'[k]}<br>${Math.round(d)} u`;
+    });
   }
   // 主线信标指引：即使在屏幕外也会在边缘显示方向，避免找不到
   const bm = $('bmark'); let sbPos = null;
@@ -780,7 +831,7 @@ function drawMap() {
   const W = mapc.width = innerWidth, H = mapc.height = innerHeight, g = mapc.getContext('2d');
   mapS = Math.min(W, H) * .44 / (GR * 1.05); mapCX = W / 2; mapCY = H / 2;
   g.fillStyle = 'rgba(140,170,255,.22)';
-  for (let k = 0; k < GAL.pos.length / 3; k += 13) g.fillRect(mx(GAL.pos[k*3]), my(GAL.pos[k*3 + 2]), 1.3, 1.3);
+  for (let k = 0; k < GAL.pos.length / 3; k += 13) g.fillRect(mx(GAL.pos[k * 3]), my(GAL.pos[k * 3 + 2]), 1.3, 1.3);
   g.fillStyle = '#ffb060'; g.beginPath(); g.arc(mx(0), my(0), 5, 0, TAU); g.fill();
   if (target) {
     g.strokeStyle = 'rgba(255,210,122,.5)'; g.setLineDash([5, 5]); g.beginPath();
