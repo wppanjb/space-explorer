@@ -84,3 +84,7 @@ button:disabled{opacity:.4;cursor:default}
 #cardbig img{max-height:80vh;max-width:90vw;border-radius:16px}
 .btnlink{display:inline-block;padding:8px 14px;border:1px solid var(--bd);border-radius:8px;color:#fff;text-decoration:none;cursor:pointer}
 #card{max-height:calc(100vh - 130px);overflow:auto}
+.tabs{display:flex;gap:6px;margin:10px 0 6px}
+.tab{padding:5px 16px;background:transparent}
+.tab.on{background:rgba(110,160,255,.4);color:#fff}
+.pane{min-height:210px}

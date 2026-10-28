@@ -36,21 +36,25 @@ const fragPlanetIdx = k => k === 0 ? 2 : systems[fragSys[k]].seed % systems[frag
 const isQuestPlanet = p => frags < FRAG_N && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags);
 
 let credits = save?.credits ?? 0;
-const up = Object.assign({ engine: 0, tank: 0, scanner: 0, boost: 0 }, save?.up || {});
+const up = Object.assign({ engine: 0, tank: 0, scanner: 0, boost: 0, cargo: 0 }, save?.up || {});
 const discovered = new Set(save?.discovered || []);
 const beaconsGot = new Set(save?.beacons || []);
 const visited = new Set(save?.visited || []);
 const probed = new Set(save?.probed || []);
 let bhDone = !!save?.ended;
 let frags = Math.min(FRAG_N, save?.frags ?? 0), playTime = save?.playTime ?? 0;
-const maxSpeed = () => 30 + 10 * up.engine, fuelMax = () => 100 + 40 * up.tank,
+const maxSpeed = () => (30 + 10 * up.engine) * (hull < 25 ? .6 : 1), fuelMax = () => 100 + 40 * up.tank,
   scanRange = () => 90 + 30 * up.scanner, scanTime = () => Math.max(1, 3 - .4 * up.scanner), energyMax = () => 100 + 30 * up.boost;
 let fuel = Math.min(save?.fuel ?? fuelMax(), fuelMax()), energy = energyMax();
+const HULL_MAX = 100; let hull = Math.min(save?.hull ?? HULL_MAX, HULL_MAX);
+const cargo = save?.cargo || {};                 // 货舱：{ 资源名: 数量 }
+const sampled = new Set(save?.sampled || []);    // 已采样的行星 id（每颗只采一次）
+const cargoMax = () => 20 + 10 * up.cargo, cargoUsed = () => Object.values(cargo).reduce((a, b) => a + b, 0);
 
 function doSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      seed, credits, up, discovered: [...discovered],
+      seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
       beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
@@ -225,6 +229,8 @@ function buildSystem(sys) {
 
   let belt = null;
   if (planets.length >= 4) {
+    // 小行星带：在第 3 颗行星轨道外，随机分布在两条半径之间
+    // a = 内半径，b = 外半径，随机分布在 a~b 之间
     const a = planets[2].p.dist + 6, b = planets[2].p.dist + 12;
     belt = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.35, 0), new THREE.MeshStandardMaterial({ color: 0x8a8070, roughness: 1 }), 700);
     const rng = mulberry32(sys.seed), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
@@ -234,7 +240,7 @@ function buildSystem(sys) {
       m.compose(new THREE.Vector3(Math.cos(an) * r, (rng() - .5) * 1.6, Math.sin(an) * r), q, new THREE.Vector3().setScalar(.4 + rng() * 1.3));
       belt.setMatrixAt(i, m)
     }
-    g.add(belt);
+    belt.userData = { a, b }; g.add(belt);
   }
 
   // 信标
@@ -250,7 +256,7 @@ function buildSystem(sys) {
       map: soft, color: 0xffc860, opacity: .9, transparent: true,
       blending: THREE.AdditiveBlending, depthWrite: false
     })); gl.scale.setScalar(14); mesh.add(gl);
-    beacons.push({ id, mesh, local, reward, label: mkLabel('bc') });
+    beacons.push({ id, mesh, glow: gl, local, reward, ...beaconInfo(sys, k), label: mkLabel('bc') });
   }
   // 主线信标：如果当前主线要求寻找信标，且它在本星系，则额外生成一个
   // Add fade=0 属性，便于在主线推进后补建时淡入显示
@@ -349,8 +355,8 @@ function updateLOD() {
 // 输入
 // =====================================================================
 const keys = {}; let mouseDX = 0, mouseDY = 0, mouseHeld = false, running = false, openP = null;
-const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards') };
-const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards';
+const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards'), cargo: $('cargo') };
+const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards' || openP === 'cargo';
 addEventListener('keydown', e => {
   if (!running) return;
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
@@ -362,6 +368,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyJ') openPanel('journal');
   if (e.code === 'KeyU') openPanel('upg');
   if (e.code === 'KeyK') openPanel('cards');
+  if (e.code === 'KeyI') openPanel('cargo');
   if (paused()) return;
   if (e.code === 'Tab') cycleTarget();
   if (e.code === 'KeyR') probeTarget();
@@ -394,7 +401,7 @@ function openPanel(n) {
   if (openP === n) { closePanel(); return }
   closePanel(); openP = n; panels[n].classList.remove('hidden');
   document.exitPointerLock?.(); mouseHeld = false;
-  if (n === 'journal') renderJournal(); if (n === 'cards') renderCards(); if (n === 'upg') renderUpg();
+  if (n === 'journal') renderJournal(); if (n === 'cards') renderCards(); if (n === 'upg') renderUpg(); if (n === 'cargo') renderCargo();
 }
 function closePanel() { if (openP) { panels[openP].classList.add('hidden'); openP = null } }
 
@@ -524,10 +531,10 @@ function questText() {
   return `主线 ${frags}/${FRAG_N}：前往 ${s.name}（${Math.round(s.pos.distanceTo(ship.pos))} u），寻找信号碎片信标`;
 }
 function collectFragment(keep = false) {
-  const k = frags; frags++; credits += 200;
+  const k = frags; frags++; credits += 200; hull = HULL_MAX; fuel = fuelMax();
   [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
   const c = $('card');
-  const html = `<h3>信号碎片 ${frags}/${FRAG_N}</h3><span class="v">+200 信用点</span><br>${FRAG_TEXT[k]}`;
+  const html = `<h3>信号碎片 ${frags}/${FRAG_N}</h3><span class="v">+200 信用点 · 船体与燃料完全恢复 · 信号发现距离 +10%</span><br>${FRAG_TEXT[k]}`;
   c.innerHTML = keep ? c.innerHTML + '<hr style="border:0;border-top:1px solid rgba(127,212,255,.25);margin:8px 0">' + html : html;
   c.classList.remove('hidden'); clearTimeout(cardTimer); cardTimer = setTimeout(() => c.classList.add('hidden'), 12000);
   toast(frags >= FRAG_N ? '七块碎片已集齐 —— 信号指向银心奇点' : `信号碎片 ${frags}/${FRAG_N} · 新的坐标已标记`, 'good');
@@ -544,6 +551,89 @@ function showEnding() {
 
 let scanT = 0, scanId = null, scanCand = null;
 const BH_T = { id: 'bh', name: '银心奇点', effR: 30, range: 320 };
+const USE = {
+  氢气: { label: '加注燃料 +15', fuel: 15 }, '氦-3': { label: '加注燃料 +40', fuel: 40 }, 甲烷冰: { label: '加注燃料 +25', fuel: 25 },
+  金属矿: { label: '修补船体 +20', hull: 20 }, 硅酸盐: { label: '修补船体 +10', hull: 10 },
+};
+const UPG_MAT = { engine: '稀土', tank: '水冰', scanner: '晶体', boost: '氦-3', cargo: '金属矿' };
+const matNeed = k => Math.ceil((up[k] + 1) / 2);
+function hit(v) {
+  const d = Math.max(0, v - 15) * .6; if (d < 1) return;
+  hull = Math.max(0, hull - d); toast(`撞击！船体 -${d.toFixed(0)}（${hull.toFixed(0)}/${HULL_MAX}）`, 'warn'); beep(90, .25, 'sawtooth', .08);
+}
+const PRICE = { 金属矿: 20, 硅酸盐: 15, 水冰: 20, 氢气: 15, 氨: 18, 甲烷冰: 22, 氨冰: 18, 稀土: 60, 晶体: 70, '氦-3': 80 };
+function takeSample(p) {
+  if (sampled.has(p.id)) return;
+  const want = Math.max(1, Math.round(p.radius)), n = Math.min(want, cargoMax() - cargoUsed());
+  if (n <= 0) { toast('货舱已满，无法采样（按 I 查看）', 'warn'); return }
+  cargo[p.info.res] = (cargo[p.info.res] || 0) + n; sampled.add(p.id);
+  toast(`采样：${p.info.res} ×${n}${n < want ? '（货舱已满，只装下一部分）' : ''}`, 'good'); doSave();
+}
+const SIG = {
+  cache: { name: '补给信标', color: 0xffd27a, css: '#ffe27a' }, distress: { name: '求救信号', color: 0x7cf0a0, css: '#7cf0a0' },
+  ruins: { name: '遗迹信号', color: 0xc9a0ff, css: '#c9a0ff' }, decoy: { name: '干扰信号', color: 0xff7a7a, css: '#ff7a7a' },
+};
+const COMMON = ['金属矿', '硅酸盐', '水冰', '氢气', '氨', '甲烷冰'], RARE = ['稀土', '晶体', '氦-3'];
+function beaconInfo(sys, k) {
+  const R = makeRng(sys.seed + 888 + k * 31), u = R.rand();
+  const type = u < .4 ? 'cache' : u < .65 ? 'distress' : u < .85 ? 'ruins' : 'decoy';
+  const power = 1 + (R.rand() < .5 ? 0 : 1) + (R.rand() < .3 ? 1 : 0);
+  return { type, power, loot: { res: type === 'ruins' ? R.pick(RARE) : R.pick(COMMON), n: R.int(2, 4) } };
+}
+const detectR = b => b.story ? 700 : (150 + 60 * up.scanner) * b.power * (1 + .1 * frags);
+const idR = b => b.story ? 1e9 : 70 + 30 * up.scanner + 8 * frags;
+function giveItem(res, n) { const k = Math.min(n, cargoMax() - cargoUsed()); if (k > 0) cargo[res] = (cargo[res] || 0) + k; return Math.max(0, k) }
+function claimBeacon(b) {
+  const m = [0, 1, 1.5, 2][b.power], parts = []; let cr = 0, good = true;
+  if (b.type === 'cache') { cr = b.reward.credits * .4 * m; const n = giveItem(b.loot.res, Math.round(b.loot.n * m)); parts.push(n ? `${b.loot.res} ×${n}` : '货舱已满，物资丢失') }
+  else if (b.type === 'distress') { cr = b.reward.credits * m; const f = Math.round(30 * m); fuel = Math.min(fuelMax(), fuel + f); parts.push(`+${f} 燃料`) }
+  else if (b.type === 'ruins') { cr = b.reward.credits * 1.5 * m; const n = giveItem(b.loot.res, b.power); parts.push(n ? `${b.loot.res} ×${n}` : '货舱已满，遗物丢失') }
+  else { good = false; const f = 8 * b.power, h = 6 * b.power; fuel = Math.max(0, fuel - f); hull = Math.max(0, hull - h); parts.push(`燃料 -${f} · 船体 -${h}`) }
+  cr = Math.round(cr); credits += cr; beaconsGot.add(b.id);
+  toast(`${SIG[b.type].name} ${'▮'.repeat(b.power)}：${cr ? `+${cr} 信用点 · ` : ''}${parts.join(' · ')}`, good ? 'good' : 'warn');
+  if (good) { beep(990, .15, 'square', .04); beep(1320, .2, 'square', .04, .12) } else beep(140, .3, 'sawtooth', .06);
+}
+
+// ===== 危险事件 =====
+let flare = null, flareCd = 20, beltAcc = 0, inBelt = false;
+const danger = () => 1 + .12 * frags;
+function hurt(d, why) {
+  if (d < 1) return;
+  hull = Math.max(0, hull - d); toast(`${why}！船体 -${d.toFixed(0)}（${hull.toFixed(0)}/${HULL_MAX}）`, 'warn'); beep(90, .25, 'sawtooth', .08);
+}
+function wreck() {
+  const h = systems[0]; let best = null, bm = -1e9;
+  for (let a = 0; a < 360; a += 30) {
+    const r = a * Math.PI / 180, p = new THREE.Vector3(Math.sin(r) * 100, 20, Math.cos(r) * 100).add(h.pos); let o = 1e9;
+    for (const s of systems) if (s !== h) o = Math.min(o, s.pos.distanceTo(p));
+    if (o > bm) { bm = o; best = p }
+  }
+  ship.pos.copy(best); ship.vel.set(0, 0, 0); ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(best, h.pos, UP)); warp = null;
+  for (const k of Object.keys(cargo)) { cargo[k] = Math.floor(cargo[k] / 2); if (cargo[k] <= 0) delete cargo[k] }
+  credits = Math.round(credits * .9); hull = HULL_MAX * .5; fuel = Math.max(fuel, 30); flare = null; inBelt = false;
+  toast('船体失效！应急信标把你送回家园恒星：货舱物资损失一半，信用点 -10%', 'warn'); beep(110, .6, 'sawtooth', .07); doSave();
+}
+function hazards(dt) {
+  if (warp) return;
+  if (hull <= 0) { wreck(); return }
+  let near = null;
+  for (const L of loaded) for (const s of L.stars) { tV.copy(s.mesh.position).add(L.sys.pos); if (ship.pos.distanceTo(tV) < s.st.radius * 5) near = { pos: tV.clone(), r: s.st.radius * 5 } }
+  if (flare) {
+    flare.t -= dt;
+    if (flare.t <= 0) { if (ship.pos.distanceTo(flare.pos) < flare.r) { hurt(12 * danger(), '恒星耀斑'); energy = 0; fuel = Math.max(0, fuel - 5) } else toast('耀斑已避开', 'good'); flare = null; flareCd = 25 }
+  } else {
+    flareCd -= dt;
+    if (near && flareCd <= 0 && Math.random() < .08 * danger() * dt) { flare = { t: 4, pos: near.pos, r: near.r }; toast('⚠ 耀斑预警：4 秒后爆发，快远离恒星！', 'warn'); beep(220, .3, 'square', .05) }
+  }
+  let now = false;
+  for (const L of loaded) {
+    if (!L.belt || !L.belt.visible) continue;
+    const { a, b } = L.belt.userData, rx = ship.pos.x - L.sys.pos.x, rz = ship.pos.z - L.sys.pos.z, ry = ship.pos.y - L.sys.pos.y, r = Math.hypot(rx, rz), v = ship.vel.length();
+    if (r > a - 1 && r < b + 1 && Math.abs(ry) < 4) { now = true; if (v > 12) { beltAcc += (v - 12) * .05 * danger() * dt; if (beltAcc >= 3) { hurt(beltAcc, '小行星撞击'); beltAcc = 0 } } }
+  }
+  if (now && !inBelt) toast('进入小行星带：减速到 12 u/s 以下可安全通过', 'warn');
+  inBelt = now;
+}
 function completeScan(c) {
   if (c.id === 'bh') {
     if (bhDone) { toast('银心奇点：数据已记录'); return }
@@ -556,6 +646,7 @@ function completeScan(c) {
     toast(`发现 ${p.name} · +${p.info.value} 信用点`, 'good');
     [660, 880, 1100].forEach((f, i) => beep(f, .18, 'triangle', .06, i * .09)); doSave();
   } else beep(500, .1);
+  takeSample(p);
   showCard(p, isNew);
   // 主线：当前碎片对应的异常行星（即使之前已扫描过，再扫一次也能取得碎片）
   if (frags < FRAG_N && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags)) collectFragment(true);
@@ -631,7 +722,11 @@ function update(dt) {
     }
     for (const o of L.orbits) o.visible = full;
     if (L.belt) L.belt.visible = full;
-    for (const b of L.beacons) b.mesh.visible = full || !!b.story;
+    for (const b of L.beacons) {
+      tV.copy(b.local).add(L.sys.pos); b.d = tV.distanceTo(ship.pos);
+      b.mesh.visible = (full || !!b.story) && b.d < detectR(b);
+      if (!b.story && !b.ided && b.d < idR(b)) { b.ided = true; const c = SIG[b.type].color; b.mesh.material.color.setHex(c); b.glow.material.color.setHex(c); if (b.type === 'decoy') toast('⚠ 检测到干扰信号：这是陷阱，别靠近', 'warn') }
+    }
     for (const pl of L.planets) { pl.show = full || isQuestPlanet(pl.p); pl.pivot.visible = pl.show }
     for (const pl of L.planets) {
       pl.M += dt * TAU / pl.p.period / 6 * pl.p.dir; orbitPos(pl.p, solveE(pl.M, pl.p.ecc), pl.mesh.position);
@@ -640,8 +735,9 @@ function update(dt) {
       if (!warp && pl.show) {
         pl.mesh.getWorldPosition(tV); tV2.copy(ship.pos).sub(tV); const rr = pl.p.radius + 2.5, d = tV2.length();
         if (d < rr && d > 0) {
+          // 计算碰撞法线，推开飞船
           tV2.divideScalar(d); ship.pos.copy(tV).addScaledVector(tV2, rr);
-          const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2)
+          const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2); hit(-vn)
         }
       }
     }
@@ -652,8 +748,9 @@ function update(dt) {
       tV.copy(s.mesh.position).add(sp);                 // 这颗恒星的世界坐标
       const sd = ship.pos.distanceTo(tV), sr = s.st.radius;
       if (!warp && sd < sr * 1.5 + 2) {
+        // 计算碰撞法线，推开飞船
         tV2.copy(ship.pos).sub(tV).normalize(); ship.pos.copy(tV).addScaledVector(tV2, sr * 1.5 + 2);
-        const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2);
+        const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2); hit(-vn)
       }
       if (sd < sr * 4.5 && fuel < fuelMax()) { fuel = Math.min(fuelMax(), fuel + 6 * dt); scooping = true }
     }
@@ -663,11 +760,7 @@ function update(dt) {
       tV.copy(b.local).add(sp);
       if (ship.pos.distanceTo(tV) < (b.pick || 14)) {
         const story = !!b.story;
-        if (!story) {
-          beaconsGot.add(b.id); credits += b.reward.credits; fuel = Math.min(fuelMax(), fuel + b.reward.fuel);
-          toast(`信标：+${b.reward.credits} 信用点${b.reward.fuel ? ` · +${b.reward.fuel} 燃料` : ''}`, 'good');
-          beep(990, .15, 'square', .04); beep(1320, .2, 'square', .04, .12);
-        }
+        if (!story) claimBeacon(b);
         L.group.remove(b.mesh); b.mesh.geometry.dispose(); b.mesh.material.dispose(); b.label.remove();
         L.beacons.splice(i, 1); if (story) collectFragment(); else doSave();
       }
@@ -714,8 +807,12 @@ function toScreen(pos) {
   projV.copy(pos).project(camera);
   return { x: (projV.x * .5 + .5) * innerWidth, y: (-projV.y * .5 + .5) * innerHeight, behind };
 }
+
 function updateHUD() {
-  $('credits').textContent = credits; $('discCount').textContent = discovered.size; $('bcCount').textContent = beaconsGot.size;
+  $('credits').textContent = credits;
+  $('cargoTxt').textContent = `${cargoUsed()}/${cargoMax()}`;
+  $('hullTxt').textContent = hull < 25 ? `受损 ${hull.toFixed(0)}/${HULL_MAX}` : `${hull.toFixed(0)}/${HULL_MAX}`; $('hullBar').firstElementChild.style.width = hull / HULL_MAX * 100 + '%';
+  $('discCount').textContent = discovered.size; $('bcCount').textContent = beaconsGot.size;
   $('fuelTxt').textContent = `${fuel.toFixed(0)}/${fuelMax()}`; $('fuelBar').firstElementChild.style.width = fuel / fuelMax() * 100 + '%';
   $('energyTxt').textContent = boostLock ? '过热' : `${energy.toFixed(0)}/${energyMax()}`;
   $('energyBar').firstElementChild.style.width = energy / energyMax() * 100 + '%';
@@ -753,9 +850,11 @@ function updateHUD() {
     }
     for (const b of L.beacons) {
       tV.copy(b.local).add(L.sys.pos); const d = tV.distanceTo(ship.pos), s = toScreen(tV);
-      if (s.behind || d > 500 || warp || !b.mesh.visible) { b.label.style.display = 'none'; continue }
+      if (s.behind || warp || !b.mesh.visible) { b.label.style.display = 'none'; continue }
       b.label.style.display = 'block'; b.label.style.transform = `translate(${s.x}px,${s.y + 16}px) translate(-50%,0)`;
-      b.label.innerHTML = (b.story ? '◈ 信号碎片' : '◈ 信号信标') + `<br>${Math.round(d)} u`;
+      const bars = b.story ? '' : ' ' + '▮'.repeat(b.power) + '▯'.repeat(3 - b.power);
+      b.label.style.color = b.ided && !b.story ? SIG[b.type].css : '';
+      b.label.innerHTML = (b.story ? '◈ 信号碎片' : b.ided ? `◈ ${SIG[b.type].name}${b.type === 'decoy' ? ' ⚠' : ''}` : '◈ 未知信号') + bars + `<br>${Math.round(d)} u`;
     }
     L.stars.forEach((x, k) => {   // 伴星标签：方便找到远处的第二、第三颗太阳
       if (!x.label) return;
@@ -804,23 +903,52 @@ function renderJournal() {
   $('jbody').innerHTML = story + `<p>已发现行星 <b>${ids.length}</b> 颗 · 到访恒星系 <b>${visited.size}/${systems.length}</b> · 信标 <b>${beaconsGot.size}</b> · 银心奇点 ${bhDone ? '✔' : '未扫描'} · 累计样本价值 <b style="color:var(--c2)">${total}</b></p>
    ${ids.length ? `<table><tr><th>名称</th><th>类型</th><th>大气</th><th>温度</th><th>资源</th><th>生命</th><th>价值</th></tr>${rows}</table>` : '<p>还没有发现。飞近行星、瞄准并按住鼠标左键扫描。</p>'}`;
 }
+function renderCargo() {
+  // 货舱
+  $('cargoCap').textContent = `${cargoUsed()}/${cargoMax()}`; $('cargoCr').textContent = credits;
+  // 只显示数量大于 0 的物品
+  const rows = Object.entries(cargo).filter(([, n]) => n > 0);
+  // 物品列表：可使用或出售
+  $('cbody').innerHTML = rows.length ? '<table>' + rows.map(([k, n]) => {
+    const u = USE[k], useless = !u || (u.fuel && fuel >= fuelMax()) || (u.hull && hull >= HULL_MAX);
+    return `<tr><td>${k}</td><td>×${n}</td><td>${u ? `<button data-u="${k}" ${useless ? 'disabled' : ''}>${u.label}</button>` : '<span style="opacity:.6">仅可出售</span>'}</td>
+      <td><button data-r="${k}">出售 ${PRICE[k] ?? 10}/个</button></td></tr>`
+  }).join('') + '</table>' : '<p>货舱是空的。扫描行星时会自动采样。</p>';
+  // 物品按钮事件
+  $('cbody').querySelectorAll('button[data-u]').forEach(b => b.onclick = () => {
+    const k = b.dataset.u, u = USE[k]; if (!cargo[k]) return;
+    if (u.fuel) fuel = Math.min(fuelMax(), fuel + u.fuel); if (u.hull) hull = Math.min(HULL_MAX, hull + u.hull);
+    if (--cargo[k] <= 0) delete cargo[k]; beep(660, .12, 'triangle'); toast(`${k}：${u.label}`, 'good'); doSave(); renderCargo();
+  });
+  // 出售按钮事件
+  $('cbody').querySelectorAll('button[data-r]').forEach(b => b.onclick = () => {
+    const k = b.dataset.r; credits += (cargo[k] || 0) * (PRICE[k] ?? 10); delete cargo[k]; beep(740, .15, 'triangle'); doSave(); renderCargo();
+  });
+}
 const UPG = [
   { k: 'engine', name: '引擎', desc: l => `巡航速度 ${30 + 10 * l} u/s` },
   { k: 'tank', name: '燃料舱', desc: l => `燃料上限 ${100 + 40 * l}` },
   { k: 'scanner', name: '扫描仪', desc: l => `扫描距离 ${90 + 30 * l} u · 耗时 ${Math.max(1, 3 - .4 * l).toFixed(1)} s` },
+  { k: 'cargo', name: '货舱', desc: l => `容量 ${20 + 10 * l}` },
   { k: 'boost', name: '推进器', desc: l => `能量上限 ${100 + 30 * l} · 回复更快` },
 ];
 const upCost = k => Math.round(120 * Math.pow(up[k] + 1, 2));
 function renderUpg() {
+  // 升级面板
   $('upgCr').textContent = credits;
+  // 物品列表：可升级或已满级
   $('ubody').innerHTML = '<table>' + UPG.map(u => {
-    const l = up[u.k], max = l >= 5;
+    const l = up[u.k], max = l >= 5, mat = UPG_MAT[u.k], need = matNeed(u.k), have = cargo[mat] || 0, can = credits >= upCost(u.k) && have >= need;
     return `<tr><td>${u.name}</td><td class="pips">${'■'.repeat(l) + '□'.repeat(5 - l)}</td><td>${u.desc(l)}${max ? '' : ` → ${u.desc(l + 1)}`}</td>
-      <td><button data-k="${u.k}" ${max || credits < upCost(u.k) ? 'disabled' : ''}>${max ? '已满级' : '升级 ' + upCost(u.k)}</button></td></tr>`
+      <td>${max ? '' : `<span style="color:${have >= need ? '#9fe8b0' : '#ff9a9a'}">${mat} ${have}/${need}</span>${have < need && cargoUsed() >= cargoMax() ? ' <span style="opacity:.7">货舱已满，按 I 腾位</span>' : ''}`}</td>
+      <td><button data-k="${u.k}" ${max || !can ? 'disabled' : ''}>${max ? '已满级' : '升级 ' + upCost(u.k)}</button></td></tr>`
   }).join('') + '</table>';
+  // 升级按钮事件
   $('ubody').querySelectorAll('button[data-k]').forEach(b => b.onclick = () => {
-    const k = b.dataset.k, c = upCost(k); if (credits < c || up[k] >= 5) return;
-    credits -= c; up[k]++; if (k === 'tank') fuel = Math.min(fuelMax(), fuel + 40); beep(740, .15, 'triangle'); doSave(); renderUpg();
+    const k = b.dataset.k, c = upCost(k), mat = UPG_MAT[k], need = matNeed(k);
+    if (credits < c || up[k] >= 5 || (cargo[mat] || 0) < need) return;
+    credits -= c; cargo[mat] -= need; if (cargo[mat] <= 0) delete cargo[mat];
+    up[k]++; if (k === 'tank') fuel = Math.min(fuelMax(), fuel + 40); beep(740, .15, 'triangle'); doSave(); renderUpg();
   });
 }
 
@@ -884,6 +1012,10 @@ mapc.addEventListener('click', e => { const s = mapHit(e); if (s) { target = s; 
 // 开始 / 循环
 // =====================================================================
 $('ver').textContent = 'v' + VERSION;
+document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === b));
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== b.dataset.tab));
+});
 $('saveHint').textContent = save ? `检测到存档：${discovered.size} 颗行星 · ${credits} 信用点 · seed ${seed}` : `seed ${seed}`;
 $('btnStart').textContent = save ? '继续探险' : '开始探险';
 $('btnStart').onclick = () => {
@@ -909,7 +1041,7 @@ const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), .05);
-  if (running && !paused()) { update(dt); updateHUD() }
+  if (running && !paused()) { update(dt); hazards(dt); updateHUD() }
   else if (!running) { // 开始界面：缓慢环视
     tQ.setFromEuler(tE.set(0, dt * .04, 0)); ship.quat.multiply(tQ); camera.quaternion.copy(ship.quat); updateLOD();
   }
