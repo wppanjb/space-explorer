@@ -348,6 +348,7 @@ function updateLOD() {
     const first = !visited.has(inside.i); visited.add(inside.i);
     const n = genPlanets(inside).filter(p => discovered.has(p.id)).length;
     toast(`进入 ${inside.name} 星系 · ${first ? '首次到访 · ' : ''}已发现 ${n}/${inside.nPlanets}`, first ? 'good' : '');
+    const ns = genStars(inside).length; if (ns === 2) know('star2', 1500); else if (ns >= 3) know('star3', 1500);
   }
   markers.forEach((m, i) => m.visible = !loaded.some(L => L.sys.i === i));
 }
@@ -356,13 +357,15 @@ function updateLOD() {
 // 输入
 // =====================================================================
 const keys = {}; let mouseDX = 0, mouseDY = 0, mouseHeld = false, running = false, openP = null;
-const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards'), cargo: $('cargo'), help: $('help') };
-const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards' || openP === 'cargo' || openP === 'help';
+const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards'), cargo: $('cargo'), help: $('help'), know: $('know') };
+const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards' || openP === 'cargo' || openP === 'help' || openP === 'know' || cardHold;
 addEventListener('keydown', e => {
   if (!running) return;
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (!$('cardbig').classList.contains('hidden') && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) { showBig(bigI + (e.code === 'ArrowLeft' ? -1 : 1)); return }
   if (e.repeat) return;
+  if (cardHold && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' || e.code === 'Escape')) { dismissCard(); return }
+  if (openP === 'know' && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) { closePanel(); return }
   keys[e.code] = true; did[e.code] = true; if (e.code === 'NumpadEnter') did.Enter = true;
   if (e.code === 'Escape') { if (!$('cardbig').classList.contains('hidden')) { $('cardbig').classList.add('hidden'); return } if (openP) closePanel(); return };
   if (e.code === 'KeyB') toggleBloom();
@@ -400,6 +403,97 @@ function setBloom(v, notify) {
 function toggleBloom() { setBloom(!bloomOn, true) }
 $('bloomChk').onchange = e => setBloom(e.target.checked, false);
 
+// ===== 游戏知识：第一次遇到时弹出 =====
+const FIG_STAR2 = `<svg class="kfig" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="gA"><stop offset="0" stop-color="#fffbe8"/><stop offset=".35" stop-color="#ffd27a"/><stop offset="1" stop-color="#ffb04a" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gB"><stop offset="0" stop-color="#f2faff"/><stop offset=".35" stop-color="#8fd0ff"/><stop offset="1" stop-color="#5fa8ff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <circle cx="180" cy="75" r="62" fill="none" stroke="#7fd4ff" stroke-opacity=".35" stroke-dasharray="3 5"/>
+  <circle cx="180" cy="75" r="12" fill="none" stroke="#ffffff" stroke-opacity=".18"/>
+  <g><animateTransform attributeName="transform" type="rotate" from="0 180 75" to="360 180 75" dur="5s" repeatCount="indefinite"/>
+    <circle cx="171" cy="75" r="17" fill="url(#gA)"/><circle cx="195" cy="75" r="11" fill="url(#gB)"/></g>
+  <g><animateTransform attributeName="transform" type="rotate" from="0 180 75" to="360 180 75" dur="22s" repeatCount="indefinite"/>
+    <circle cx="242" cy="75" r="5" fill="#6fa8ff"/><circle cx="240.5" cy="73.5" r="1.8" fill="#cfe6ff"/></g>
+  <circle cx="180" cy="75" r="1.6" fill="#fff"/>
+  <text x="180" y="108" fill="#9fb4d6" font-size="9" text-anchor="middle">质心</text>
+  <text x="350" y="138" fill="#7fd4ff" font-size="10" text-anchor="end">行星轨道 ≥ 2.5 × 两星间距</text>
+</svg>`;
+const FIG_STAR3 = `<svg class="kfig" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="gA3"><stop offset="0" stop-color="#fffbe8"/><stop offset=".35" stop-color="#ffd27a"/><stop offset="1" stop-color="#ffb04a" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gB3"><stop offset="0" stop-color="#f2faff"/><stop offset=".35" stop-color="#8fd0ff"/><stop offset="1" stop-color="#5fa8ff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="gC3"><stop offset="0" stop-color="#fff0e8"/><stop offset=".35" stop-color="#ff9a6a"/><stop offset="1" stop-color="#ff7a4a" stop-opacity="0"/></radialGradient>
+  </defs>
+  <circle cx="110" cy="75" r="200" fill="none" stroke="#ff9a6a" stroke-opacity=".25" stroke-dasharray="2 6"/>
+  <circle cx="110" cy="75" r="52" fill="none" stroke="#7fd4ff" stroke-opacity=".35" stroke-dasharray="3 5"/>
+  <circle cx="110" cy="75" r="30" fill="none" stroke="#ff7a7a" stroke-opacity=".28" stroke-dasharray="1 4"/>
+  <g><animateTransform attributeName="transform" type="rotate" from="0 110 75" to="360 110 75" dur="5s" repeatCount="indefinite"/>
+    <circle cx="101" cy="75" r="14" fill="url(#gA3)"/><circle cx="125" cy="75" r="9" fill="url(#gB3)"/></g>
+  <g><animateTransform attributeName="transform" type="rotate" from="0 110 75" to="360 110 75" dur="20s" repeatCount="indefinite"/>
+    <circle cx="162" cy="75" r="4.5" fill="#6fa8ff"/></g>
+  <circle cx="310" cy="75" r="16" fill="url(#gC3)"><animate attributeName="r" values="15;17;15" dur="4s" repeatCount="indefinite"/></circle>
+  <text x="310" y="108" fill="#ffb59a" font-size="9" text-anchor="middle">远处的第三颗</text>
+  <text x="110" y="140" fill="#9fb4d6" font-size="9" text-anchor="middle">内侧双星</text>
+  <text x="168" y="22" fill="#7fd4ff" font-size="10">稳定区（窄带）</text>
+</svg>`;
+
+function knowRich(K) {
+  return K.svg + `<div class="kbody"><h2>📖 ${K.t}</h2><div class="ktag">${K.tag}</div>
+    <div class="kchips">${K.chips.map(c => `<span class="kchip">${c}</span>`).join('')}</div>` +
+    K.sec.map(([ico, h, p, cls]) => `<div class="ksec ${cls || ''}"><div class="kico">${ico}</div><div><h4>${h}</h4><p>${p}</p></div></div>`).join('') +
+    `<div class="kfoot"><span class="hint">Enter / Space / Esc 关闭</span><button id="knowOk2">知道了</button></div></div>`;
+}
+const KNOW = {
+  star2: {
+    t: '双星系统', svg: FIG_STAR2, tag: '两颗恒星，一个共同的质心',
+    chips: ['恒星 ×2', '行星轨道 ≥ 2.5× 两星间距'],
+    sec: [
+      ['🌌', '这是什么', '两颗恒星并不是一颗绕着另一颗转，而是<b>一起围绕共同的质心</b>公转。质量越接近，就越像互相追逐。银河里大约有<b>一半</b>的类太阳恒星都有伴星，单星反而没那么"普通"。'],
+      ['🪐', '行星在哪里', '太近的轨道会被两颗恒星轮流拉扯而失稳，所以行星只能待在<b>离它们足够远</b>的地方，整体绕着质心转，游戏里是两星间距约 2.5 倍以外。现实中这类"环双星行星"已被发现，天空中会同时挂着<b>两个太阳</b>。'],
+      ['✨', '特别之处', '两颗恒星的类型可能不同，一颗橙黄、一颗蓝白，行星表面会有<b>两种颜色的光和影</b>。两颗星的相对位置不断变化，白天和黑夜也比单星复杂。'],
+      ['🚀', '游戏提示', '每颗恒星都可以靠近补充燃料，也都可能爆发<b>耀斑</b>。飞近任何一颗之前，先留意耀斑预警。', 'tip'],
+    ]
+  },
+  star3: {
+    t: '三星系统', svg: FIG_STAR3, tag: '一对紧密的恒星，和一颗遥远的伴星',
+    chips: ['恒星 ×3', '行星只能待在两条界线之间'],
+    sec: [
+      ['🌌', '这是什么', '稳定的三星系统几乎都是<b>层级式</b>的：两颗恒星紧紧相伴，第三颗在远处绕着这一对公转。三颗星地位平等地互相绕转极不稳定，往往很快就有一颗被抛出系统。半人马座 α 就是一个例子。'],
+      ['🪐', '一条窄带', '行星被夹在两条界线之间：<b>内侧</b>是紧密双星的搅动（太近会失稳），<b>外侧</b>是第三颗恒星的引力（太远会被扯走）。所以这里的行星往往挤在一条<b>较窄的轨道带</b>里。'],
+      ['✨', '特别之处', '天空中最多可以同时有三个"太阳"，亮度和颜色各不相同。远处那颗伴星看起来更像一颗特别亮的星，而不是太阳。'],
+      ['🚀', '游戏提示', '每颗恒星都可以靠近采集燃料，但也都可能爆发<b>耀斑</b>。这里有三颗恒星，可以挑离耀斑最远、最安全的那一颗靠近。行星彼此靠得近，常常可以一口气扫描完。', 'tip'],
+    ]
+  },
+  kind_rock: {
+    t: '岩石行星', h: `<p>有固体表面的类地行星，离恒星较近的行星大多是这一类。</p>
+    <p>主要由金属和硅酸盐构成，采样可得到<b>固体材料</b>（具体看卡片上的"资源"一栏）。有些还有大气，甚至生命，<b>样本价值越高</b>，奖励越多。</p>
+    <p>扫描岩石行星可补充 <b>10</b> 点燃料。</p>` },
+  kind_gas: {
+    t: '气态巨行星', h: `<p>主要由氢和氦组成，<b>没有固体表面</b>，体积大、质量大，常带有行星环和较多卫星。</p>
+    <p>它们是良好的燃料来源：扫描气态巨行星可补充 <b>25</b> 点燃料，比岩石行星多得多。</p>` },
+  kind_ice: {
+    t: '冰巨行星', h: `<p>类似天王星、海王星：厚厚的氢氦外层下面，是大量的<b>水、氨、甲烷</b>等"冰"。因为距离恒星很远，温度极低。</p>
+    <p>采样常得到<b>水冰、氨、甲烷冰</b>这类材料。扫描可补充 <b>10</b> 点燃料。</p>` },
+};
+let knowSeen = new Set(), knowQ = [];
+try { knowSeen = new Set(JSON.parse(localStorage.getItem('deepspace-know') || '[]')) } catch { }
+function know(key, delay = 0) {
+  if (!KNOW[key] || knowSeen.has(key) || knowQ.includes(key)) return;
+  knowQ.push(key); setTimeout(knowTry, delay);
+}
+function knowTry() {
+  if (!knowQ.length) return;
+  if (openP || !running) { setTimeout(knowTry, 1000); return }   // 有别的面板开着就稍后再弹
+  const key = knowQ.shift(); knowSeen.add(key);
+  try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
+  const K = KNOW[key], box = $('know').firstElementChild;
+  box.classList.toggle('rich', !!K.svg);   // 双星/三星用新版排版
+  box.innerHTML = K.svg ? knowRich(K) : `<h2>📖 ${K.t}</h2>${K.h}<div class="row" style="margin-top:12px"><button id="knowOk">知道了</button></div><p class="hint">Enter / Space / Esc 关闭</p>`;
+  box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
+  openPanel('know'); beep(520, .12, 'triangle', .04);
+  if (knowQ.length) setTimeout(knowTry, 1000);
+}
 function openPanel(n) {
   if (openP === n) { closePanel(); return }
   closePanel(); openP = n; panels[n].classList.remove('hidden');
@@ -468,15 +562,35 @@ function flyIn(el, { hold = 2200, fly = 650, tail = 3900, scale = 1.35, endScale
     { opacity: fade ? 0 : 1, transform: end, offset: 1 }], { duration: T });
 }
 
+// 第一次扫描某类行星：返回要显示在卡片上的介绍（只出现一次）
+function kindNote(p) {
+  const key = 'kind_' + p.kind;
+  if (!KNOW[key] || knowSeen.has(key)) return '';
+  knowSeen.add(key);
+  try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
+  return `<div class="kinfo"><b>${KNOW[key].t}</b>${KNOW[key].h.replace(/<\/p>\s*$/, '<button id="cardOk">知道了（Enter）</button></p>')}</div>`;
+}
 let cardAnim;
+let cardHold = false, cardHoldMs = 0;
 function showCard(p, isNew) {
-  const i = p.info, c = $('card');
-  c.innerHTML = `<img src="${cardURL(p)}" style="border-radius:10px;display:block;margin:0 auto 6px">` +
+  const i = p.info, c = $('card'), note = kindNote(p);
+  c.innerHTML = `<div style="position:relative"><img src="${cardURL(p)}" style="border-radius:10px;display:block;margin:0 auto 6px">${note}</div>` +
     (isNew ? `<span class="v">+${i.value} 信用点 · +${i.fuelGain} 燃料 · 已收藏</span>` : '已收藏');
   c.classList.remove('hidden'); clearTimeout(cardTimer); cardAnim?.cancel();
-  cardAnim = flyIn(c, { tail: 0, fade: true, scale: 1, endScale: 230 / c.offsetWidth })   // 中央停留 2.2s → 飞向右上角并淡出
-  cardTimer = setTimeout(() => c.classList.add('hidden'), 3100);   // 250 + 2200 + 650
+  if (note) {   // 有介绍：留在中央，暂停游戏，等玩家关闭
+    cardHold = true; cardHoldMs = 3600000; document.exitPointerLock?.(); mouseHeld = false;
+    cardAnim = flyIn(c, { hold: cardHoldMs, tail: 0, fade: true, scale: 1, endScale: 230 / c.offsetWidth });
+  } else {
+    cardAnim = flyIn(c, { hold: 2200, tail: 0, fade: true, scale: 1, endScale: 230 / c.offsetWidth });
+    cardTimer = setTimeout(() => c.classList.add('hidden'), 3100);
+  }
 }
+function dismissCard() {
+  if (!cardHold) return; cardHold = false;
+  cardAnim.currentTime = 250 + cardHoldMs;   // 跳到动画的"飞走"那一段
+  cardTimer = setTimeout(() => $('card').classList.add('hidden'), 750);
+}
+$('card').addEventListener('click', e => { if (e.target.id === 'cardOk') dismissCard() });
 
 // =====================================================================
 // 目标 / 曲速
@@ -578,9 +692,12 @@ function collectFragment(keep = false) {
   const c = $('card');
   const html = `<div style="font-size:17px;line-height:1.8"><h3>信号碎片 ${frags}/${FRAG_N}</h3><span class="v" style="font-size:13px">+200 信用点 · 船体与燃料完全恢复 · 信号发现距离 +10%</span><br><br>${FRAG_TEXT[k]}</div>`;
   c.innerHTML = keep ? html + '<hr style="border:0;border-top:1px solid rgba(127,212,255,.25);margin:8px 0">' + c.innerHTML : html;
-  c.classList.remove('hidden'); clearTimeout(cardTimer); cardAnim?.cancel();
-  cardAnim = flyIn(c, { hold: 6500, tail: 0, fade: true, scale: 1, endScale: 230 / c.offsetWidth });
-  cardTimer = setTimeout(() => c.classList.add('hidden'), 7400);   // 250 + 6500 + 650
+  c.classList.remove('hidden'); clearTimeout(cardTimer);
+  if (!cardHold) {
+    cardAnim?.cancel();
+    cardAnim = flyIn(c, { hold: 6500, tail: 0, fade: true, scale: 1, endScale: 230 / c.offsetWidth });
+    cardTimer = setTimeout(() => c.classList.add('hidden'), 7400);   // 250 + 6500 + 650
+  }
   toast(frags >= FRAG_N ? '七块碎片已集齐 —— 信号指向银心奇点' : `信号碎片 ${frags}/${FRAG_N} · 新的坐标已标记`, 'good');
   loaded.forEach(addStoryBeacon);   // 下一块碎片的星系若已加载，立即补建信标
   setQuestTarget(); doSave();
@@ -738,7 +855,7 @@ function tutTick(dt) {
 const tutRestart = () => { tutOff = false; tutDone = []; tutCur = -1; tutSub = 0; tutQueue = []; tutFlash = 0; tutShown = 0; tutFin = 0; for (const k in did) delete did[k]; lookAcc = 0; tutSave() };
 $('tutChk').checked = !tutOff;
 $('tutChk').onchange = e => { if (e.target.checked) tutRestart(); else { tutOff = true; tutSave() } };
-$('tutReset').onclick = () => { tutRestart(); closePanel(); toast('教学已重新开始', 'good') };
+$('tutReset').onclick = () => { tutRestart(); knowSeen.clear(); try { localStorage.removeItem('deepspace-know') } catch { } closePanel(); toast('教学已重新开始', 'good') };
 $('tutOff').onclick = () => { tutOff = true; tutSave(); closePanel(); $('tutor').classList.add('hidden') };
 // ===== 危险事件 =====
 let flare = null, flareCd = 20, beltAcc = 0, inBelt = false;

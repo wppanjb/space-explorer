@@ -97,3 +97,24 @@ button:disabled{opacity:.4;cursor:default}
 #cflt{background:rgba(8,14,32,.9);color:#fff;border:1px solid var(--bd);border-radius:6px;padding:5px 10px;font:inherit;font-size:13px}
 #redfx{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:5;
   background:radial-gradient(ellipse at center,rgba(255,0,0,0) 45%,rgba(255,40,40,.75) 100%)}
+#card .kinfo{position:absolute;left:4%;right:4%;bottom:39%;background:rgba(6,12,28,.62);border:1px solid rgba(127,212,255,.25);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.65;text-align:left}
+#card .kinfo > b{display:block;color:var(--c2);font-size:14px;margin-bottom:2px}
+#card .kinfo p{margin:3px 0}
+#card .kinfo{display:flow-root;position:absolute;left:4%;right:4%;bottom:39%;background:rgba(6,12,28,.62);border:1px solid rgba(127,212,255,.25);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.65;text-align:left}
+#card .kinfo button{float:right;margin-left:10px;padding:1px 10px;font-size:12px;pointer-events:auto}
+#card button{pointer-events:auto}
+#know .box.rich{max-width:580px;padding:0;overflow:auto}
+#know .kfig{display:block;width:100%;height:auto;background:radial-gradient(ellipse at 50% 50%,#12264f 0%,#060b1c 75%);border-bottom:1px solid var(--bd)}
+#know .kbody{padding:16px 24px 20px}
+#know .kbody h2{margin:0;font-size:22px;letter-spacing:.14em}
+#know .ktag{color:var(--c2);font-size:13.5px;margin:3px 0 10px}
+#know .kchips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+#know .kchip{font-size:12px;padding:2px 10px;border-radius:999px;background:rgba(127,212,255,.12);border:1px solid rgba(127,212,255,.3);color:var(--c)}
+#know .ksec{display:flex;gap:12px;padding:9px 0;border-top:1px solid rgba(127,212,255,.12)}
+#know .kico{flex:none;width:28px;height:28px;border-radius:8px;background:rgba(127,212,255,.1);display:flex;align-items:center;justify-content:center;font-size:15px}
+#know .ksec h4{margin:0 0 2px;font-size:13.5px;color:#fff;letter-spacing:.06em}
+#know .ksec p{margin:0;font-size:13px;line-height:1.75;opacity:.9}
+#know .ksec.tip{background:rgba(255,210,122,.07);border-radius:8px;padding:9px 10px;border-top:0;margin-top:6px}
+#know .ksec.tip h4{color:var(--c2)}
+#know .kfoot{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+#know .kfoot .hint{margin:0!important}
