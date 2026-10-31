@@ -44,7 +44,7 @@ canvas{display:block}
 .toast.good{border-color:#9dff9d;color:#d9ffd9}
 .toast.warn{border-color:#ff9d7a;color:#ffd9cc}
 @keyframes fade{0%{opacity:0;transform:translateY(-6px)}8%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
-#card{position:absolute;right:16px;top:110px;width:230px;line-height:1.7;animation:slide .35s}
+#card{position:absolute;right:16px;top:110px;width:230px;line-height:1.7}
 @keyframes slide{from{opacity:0;transform:translateX(20px)}}
 #card h3{margin:0 0 4px;color:#fff;font-size:14px}
 #card .v{color:var(--c2)}
@@ -68,11 +68,11 @@ button:disabled{opacity:.4;cursor:default}
 .row{display:flex;gap:10px;margin-top:14px}
 .hint{opacity:.5;font-size:11.5px;margin-top:12px!important}
 .pips{letter-spacing:3px;color:var(--c2)}
-#mapw{padding:0;background:rgba(0,0,8,.88)}
+#mapw{padding:0;background:rgba(0,0,8,.95)}
 #mapc{width:100%;height:100%}
 #maptip{position:absolute;pointer-events:none;background:var(--bg);border:1px solid var(--bd);border-radius:6px;
   padding:5px 9px;font-size:12px;line-height:1.5;display:none}
-#maphelp{position:absolute;left:16px;top:14px;font-size:12px;opacity:.75;line-height:1.7}
+#maphelp{position:absolute;left:16px;top:14px;font-size:13px;opacity:.95;line-height:1.7}
 #mapbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:14px;
   background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:8px 14px;font-size:12.5px;max-width:92vw}
 .ver{font-size:12px;letter-spacing:.1em;opacity:.55;margin-left:8px;font-weight:400;vertical-align:middle}
@@ -83,8 +83,17 @@ button:disabled{opacity:.4;cursor:default}
 #cardbig{z-index:30}
 #cardbig img{max-height:80vh;max-width:90vw;border-radius:16px}
 .btnlink{display:inline-block;padding:8px 14px;border:1px solid var(--bd);border-radius:8px;color:#fff;text-decoration:none;cursor:pointer}
-#card{max-height:calc(100vh - 130px);overflow:auto}
+#card{position:absolute;right:16px;top:110px;width:max-content;min-width:230px;max-width:min(530px,92vw);line-height:1.7}
+#card img{width:480px;height:640px;max-width:100%;max-height:72vh;object-fit:contain}
 .tabs{display:flex;gap:6px;margin:10px 0 6px}
 .tab{padding:5px 16px;background:transparent}
 .tab.on{background:rgba(110,160,255,.4);color:#fff}
 .pane{min-height:210px}
+#tutor{position:absolute;left:50%;bottom:122px;transform:translateX(-50%);max-width:560px;text-align:center;font-size:14px;line-height:1.6;border-color:rgba(255,210,122,.5)}
+#tutor small{color:var(--c2);letter-spacing:.1em}
+#tutor .k{color:var(--c2)}
+#tutor.ok{border-color:#7cf0a0;color:#9fe8b0}
+.hint2{opacity:.8}
+#cflt{background:rgba(8,14,32,.9);color:#fff;border:1px solid var(--bd);border-radius:6px;padding:5px 10px;font:inherit;font-size:13px}
+#redfx{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:5;
+  background:radial-gradient(ellipse at center,rgba(255,0,0,0) 45%,rgba(255,40,40,.75) 100%)}

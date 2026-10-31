@@ -5,9 +5,10 @@ import { FRAG_N } from './constants.js';
 // 主线碎片：从母星系出发，逐步向银心推进（偶数序号=扫描异常行星，奇数序号=寻找信标）
 export function genFragments(seed, systems){
   // R = 伪随机数生成器，bands = 每个碎片的目标半径，used = 已选星系索引集合，out = 已选星系索引列表
-  const R=makeRng(seed+4242),bands = [365, 608, 496, 400, 304, 224, 160],used=new Set([0]),out=[0];
-  for(let k=1;k<FRAG_N;k++){
-    const prev=systems[out[k-1]].pos;let best=null,bs=1e9;
+  const R=makeRng(seed+4242),bands = [365, 608, 496, 400, 304, 224, 160],used=new Set([0]),out=[];
+  for(let k=0;k<FRAG_N;k++){
+    const prev=k===0?systems[0].pos:systems[out[k-1]].pos;
+    let best=null,bs=1e9;
     for(const s of systems){
       if(used.has(s.i))continue;
       const r=Math.hypot(s.pos.x,s.pos.z),dp=s.pos.distanceTo(prev);

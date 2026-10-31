@@ -41,7 +41,7 @@
       <div class="bar" id="energyBar"><i></i></div>
       速度 <span id="speedTxt" style="float:right">0 u/s</span>
     </div>
-    <div id="br">Tab 选目标 · R 探测 · G 曲速 · M 星图 · J 日志 · U 升级 · K 收藏 · I 货舱 · B 辉光</div>
+    <div id="br">Tab 选目标 · R 探测 · G 曲速 · M 星图 · J 日志 · U 升级 · H 帮助 · K 收藏 · I 货舱 · B 辉光</div>
     <div id="reticle"><svg viewBox="0 0 80 80">
         <circle cx="40" cy="40" r="26" />
         <circle id="ring" cx="40" cy="40" r="26" transform="rotate(-90 40 40)" />
@@ -49,6 +49,7 @@
       <div class="dot"></div>
     </div>
     <div id="prompt"></div>
+    <div id="tutor" class="box hidden"></div>
     <div id="labels"></div>
     <div id="bmark" class="hidden"><b>◈</b><span id="bmarkTxt"></span></div>
     <div id="tmark" class="hidden"><b>◆</b><span id="tmarkTxt"></span></div>
@@ -56,12 +57,72 @@
     <div id="card" class="box hidden"></div>
   </div>
   <div id="warpfx"></div>
-
+<div id="redfx"></div>
   <!-- 开始界面 -->
   <div id="start" class="overlay">
     <div class="box">
       <h1>DEEP SPACE EXPLORER <span class="ver" id="ver"></span></h1>
       <p>驾驶你的探索飞船穿越一座程序化生成的旋臂星系，扫描未知行星，收集资源，抵达银河中心。</p>
+      <p class="hint2">首次游玩会有逐步的新手提示，不用先背操作。游戏中按 <b style="color:var(--c2)">H</b> 随时查看全部操作与说明。</p>
+      <p><label><input type="checkbox" id="tutChk"> 新手教学（逐步提示操作，完成后自动关闭）</label></p>
+      <p><label><input type="checkbox" id="bloomChk"> 辉光效果（游戏中按 <b style="color:var(--c2)">B</b> 随时开关；关闭可提升性能）</label>
+      </p>
+      <div class="row"><button id="btnStart">开始探险</button><button id="btnNew">🎲 新的银河</button></div>
+      <p class="hint" id="saveHint"></p>
+    </div>
+  </div>
+
+  <!-- 结局 -->
+  <div id="ending" class="overlay hidden">
+    <div class="box">
+      <h1>信号解码完成</h1>
+      <p>奇点回应了你。无数星光在眼前展开——那是先驱者留下的全部星图，每一颗恒星、每一条航线都在向你敞开。</p>
+      <p>他们并没有消失，只是把这片星海托付给了下一个愿意远行的人。现在，你就是继承者。</p>
+      <p id="endStats" style="color:var(--c2)"></p>
+      <div class="row"><button id="btnEndClose">继续探索</button></div>
+      <p class="hint">银河仍然向你开放：还有大量行星、信标和升级等着你。</p>
+    </div>
+  </div>
+
+  <!-- 面板 -->
+  <div id="journal" class="overlay hidden">
+    <div class="box">
+      <h2>探索日志</h2>
+      <div id="jbody"></div>
+      <p class="hint">J 或 Esc 关闭</p>
+    </div>
+  </div>
+  <div id="cards" class="overlay hidden">
+    <div class="box">
+      <h2>行星收藏</h2>
+      <div style="margin-bottom:10px"><select id="cflt"></select></div>
+      <div id="cgrid"></div>
+      <p class="hint">K 或 Esc 关闭 · 点击卡片查看大图</p>
+    </div>
+  </div>
+  <div id="cardbig" class="overlay hidden">
+    <div style="text-align:center"><img id="cardimg" alt="">
+      <div class="row" style="justify-content:center;margin-top:10px;gap:10px;align-items:center">
+        <button id="cardPrev">‹ 上一张</button>
+        <span id="cardIdx" style="min-width:56px"></span>
+        <button id="cardNext">下一张 ›</button>
+        <a id="cardDl" class="btnlink">下载 PNG</a>
+        <button id="cardClose">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="upg" class="overlay hidden">
+    <div class="box">
+      <h2>飞船升级</h2>
+      <p>信用点：<b id="upgCr" style="color:var(--c2)"></b></p>
+      <div id="ubody"></div>
+      <p class="hint">U 或 Esc 关闭 · 升级材料从货舱取用：按 I 打开货舱，可出售物品来腾出空间</p>
+    </div>
+  </div>
+  <div id="help" class="overlay hidden">
+    <div class="box">
+      <h2>帮助</h2>
       <div class="tabs"><button class="tab on" data-tab="tabKeys">操作</button><button class="tab"
           data-tab="tabGuide">游戏说明</button></div>
       <div id="tabKeys" class="pane">
@@ -72,7 +133,7 @@
           </tr>
           <tr>
             <td>W A S D</td>
-            <td>前进 / 左移 / 后退 / 右移 · <b>空格</b> 上升 · <b>C</b> 下降 · <b>Q E</b> 滚转</td>
+            <td>前进 / 左移 / 后退 / 右移 · <b>Z</b> 上升 · <b>C</b> 下降 · <b>Q E</b> 滚转</td>
           </tr>
           <tr>
             <td>Shift</td>
@@ -107,52 +168,8 @@
         <p><b style="color:var(--c2)">船体：</b>高速撞击行星或恒星会受损，低于 25 时速度大减。</p>
         <p><b style="color:var(--c2)">小贴士：</b>靠近恒星可采集燃料；气态巨行星的扫描会补充燃料；留意金色的“◈ 信号信标”；多星系统里有伴星，留意标签。</p>
       </div>
-      <p><label><input type="checkbox" id="bloomChk"> 辉光效果（游戏中按 <b style="color:var(--c2)">B</b> 随时开关；关闭可提升性能）</label>
-      </p>
-      <div class="row"><button id="btnStart">开始探险</button><button id="btnNew">🎲 新的银河</button></div>
-      <p class="hint" id="saveHint"></p>
-    </div>
-  </div>
-
-  <!-- 结局 -->
-  <div id="ending" class="overlay hidden">
-    <div class="box">
-      <h1>信号解码完成</h1>
-      <p>奇点回应了你。无数星光在眼前展开——那是先驱者留下的全部星图，每一颗恒星、每一条航线都在向你敞开。</p>
-      <p>他们并没有消失，只是把这片星海托付给了下一个愿意远行的人。现在，你就是继承者。</p>
-      <p id="endStats" style="color:var(--c2)"></p>
-      <div class="row"><button id="btnEndClose">继续探索</button></div>
-      <p class="hint">银河仍然向你开放：还有大量行星、信标和升级等着你。</p>
-    </div>
-  </div>
-
-  <!-- 面板 -->
-  <div id="journal" class="overlay hidden">
-    <div class="box">
-      <h2>探索日志</h2>
-      <div id="jbody"></div>
-      <p class="hint">J 或 Esc 关闭</p>
-    </div>
-  </div>
-  <div id="cards" class="overlay hidden">
-    <div class="box">
-      <h2>行星收藏</h2>
-      <div id="cgrid"></div>
-      <p class="hint">K 或 Esc 关闭 · 点击卡片查看大图</p>
-    </div>
-  </div>
-  <div id="cardbig" class="overlay hidden">
-    <div style="text-align:center"><img id="cardimg" alt="">
-      <div class="row" style="justify-content:center;margin-top:10px"><a id="cardDl" class="btnlink">下载 PNG</a><button
-          id="cardClose">关闭</button></div>
-    </div>
-  </div>
-  <div id="upg" class="overlay hidden">
-    <div class="box">
-      <h2>飞船升级</h2>
-      <p>信用点：<b id="upgCr" style="color:var(--c2)"></b></p>
-      <div id="ubody"></div>
-      <p class="hint">U 或 Esc 关闭 · 升级材料从货舱取用：按 I 打开货舱，可出售物品来腾出空间</p>
+      <div class="row"><button id="tutReset">重新开始教学</button><button id="tutOff">关闭教学提示</button></div>
+      <p class="hint">H 或 Esc 关闭</p>
     </div>
   </div>
   <div id="cargo" class="overlay hidden">
@@ -160,11 +177,13 @@
       <h2>货舱</h2>
       <p>容量：<b id="cargoCap"></b> · 信用点：<b id="cargoCr" style="color:var(--c2)"></b></p>
       <div id="cbody"></div>
-      <p class="hint">I 或 Esc 关闭</p>
+      <p class="hint">I 或 Esc 关闭 · 资源可加注燃料、修补船体或出售</p>
     </div>
   </div>
   <div id="mapw" class="overlay hidden"><canvas id="mapc"></canvas>
-    <div id="maphelp">银河星图 · 点击恒星设为目标，再按 R 远程探测<br>青色 = 已到访 · 紫色 = 已探测 · 灰色 = 未知<br>
+    <div id="maphelp">银河星图 · 点击恒星设为目标，再按 R 远程探测<br>
+      <span style="color:#5fe0ff">● 青色 = 已到访</span> · <span style="color:#c9a8ff">● 紫色 = 已探测</span> · <span
+        style="color:#8fa0c4">○ 空心灰 = 未知</span><br>
       <span style="color:#9dff9d">●</span> 生命迹象 · <span style="color:#ff9d5c">●</span> 气态巨行星 · <span
         style="color:#ffe27a">●</span> 未取信标 · ★ 主线信号<br>M / Esc 关闭
     </div>

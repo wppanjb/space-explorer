@@ -66,7 +66,7 @@ export function genSystems(R, gal, count = 45) {
   const N = gal.pos.length / 3;
   for (let tries = 0; list.length < count && tries < 4000; tries++) {
     const k = R.int(0, N - 1), x = gal.pos[k * 3], y = gal.pos[k * 3 + 1], z = gal.pos[k * 3 + 2], r = Math.hypot(x, z);
-    if (r < 80 || r > GR * .95) continue;
+    if (r < 200 || r > GR * .95) continue;
     const p = new THREE.Vector3(x, y * .3, z);
     if (list.some(s => s.pos.distanceTo(p) < 150)) continue;
     mk([x, y * .3, z], false);
