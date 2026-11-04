@@ -97,11 +97,11 @@ button:disabled{opacity:.4;cursor:default}
 #cflt{background:rgba(8,14,32,.9);color:#fff;border:1px solid var(--bd);border-radius:6px;padding:5px 10px;font:inherit;font-size:13px}
 #redfx{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:5;
   background:radial-gradient(ellipse at center,rgba(255,0,0,0) 45%,rgba(255,40,40,.75) 100%)}
-#card .kinfo{position:absolute;left:4%;right:4%;bottom:39%;background:rgba(6,12,28,.62);border:1px solid rgba(127,212,255,.25);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.65;text-align:left}
+#card .kinfo{position:absolute;left:4%;right:4%;bottom:39%;background:rgba(6,12,28,.62);border:1px solid rgba(127,212,255,.25);border-radius:8px;padding:8px 12px;font-size:14px;line-height:1.65;text-align:left}
 #card .kinfo > b{display:block;color:var(--c2);font-size:14px;margin-bottom:2px}
 #card .kinfo p{margin:3px 0}
 #card .kinfo{display:flow-root;position:absolute;left:4%;right:4%;bottom:39%;background:rgba(6,12,28,.62);border:1px solid rgba(127,212,255,.25);border-radius:8px;padding:8px 12px;font-size:13px;line-height:1.65;text-align:left}
-#card .kinfo button{float:right;margin-left:10px;padding:1px 10px;font-size:12px;pointer-events:auto}
+#card .kinfo button{float:right;margin-left:10px;padding:1px 10px;font-size:14px;pointer-events:auto}
 #card button{pointer-events:auto}
 #know .box.rich{max-width:580px;padding:0;overflow:auto}
 #know .kfig{display:block;width:100%;height:auto;background:radial-gradient(ellipse at 50% 50%,#12264f 0%,#060b1c 75%);border-bottom:1px solid var(--bd)}

@@ -12,6 +12,8 @@ import { genFragments, fragKind } from './story.js';
 import { beep } from './audio.js';
 import { soft, disc, planetTexture, pointCloud } from './graphics.js';
 import { drawPlanetCard } from './cards.js';
+import { T } from './text.js';
+import * as H from './templates.js';
 
 
 const $ = id => document.getElementById(id);
@@ -33,7 +35,7 @@ const GAL = genGalaxy(R0), BG = genBackground(R0), NEB = genNebulae(R0), systems
 const fragSys = genFragments(seed, systems);
 const fragPlanetIdx = k => systems[fragSys[k]].seed % systems[fragSys[k]].nPlanets;
 // 当前主线要扫描的那颗行星（同时存在两个星系时，副星系只显示它）
-const isQuestPlanet = p => frags < FRAG_N && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags);
+const isQuestPlanet =p => qOn() &&  fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags);
 
 let credits = save?.credits ?? 0;
 const up = Object.assign({ engine: 0, tank: 0, scanner: 0, boost: 0, cargo: 0 }, save?.up || {});
@@ -43,6 +45,21 @@ const visited = new Set(save?.visited || []);
 const probed = new Set(save?.probed || []);
 let bhDone = !!save?.ended;
 let frags = Math.min(FRAG_N, save?.frags ?? 0), playTime = save?.playTime ?? 0;
+// ===== 军衔与经验 =====
+const RANK_QUESTS = [0, 1, 2, 4, 7, 7];   // 各军衔已解锁的主线数量
+const RANKS = T.rankNames.map((name, i) => ({ name, quests: RANK_QUESTS[i] }));
+const RANK_NEED = [100, 300, 500, 1000, 2000];   // 升到下一级所需的【累计】经验
+const SYS_XP = [30, 50, 100, 200, 300, 300];      // 各军衔「完成一个星系」得到的经验（实习生/初级/中级/高级/资深/特级）
+const rankOf = x => RANK_NEED.filter(n => x >= n).length;
+const doneSys = new Set(save?.done ?? (save ? systems.filter(s => genPlanets(s).every(p => discovered.has(p.id))).map(s => s.i) : []));
+let xp = save?.xp ?? (save ? discovered.size * 10 + beaconsGot.size * 5 + frags * 50 + doneSys.size * 30 : 0);   // 旧存档按已有进度估算
+const rankTarget = () => doneSys.has(0) ? rankOf(xp) : 0;     // 经验够了的军衔（家园星系没扫完前一直是实习生）
+let rankSeen = save?.rankSeen ?? (save ? rankTarget() : 0);   // 玩家已被授予的军衔：晋升弹窗之后才会提高
+let collectPending = false, welcomed = !!save;   // 新游戏：移动教学完成后再显示欢迎
+const rank = () => rankSeen;
+const qOn = () => frags < FRAG_N && frags < RANKS[rank()].quests;   // 下一块碎片是否已解锁
+const bhOn = () => frags >= FRAG_N && !bhDone && rank() >= 5;        // 奇点任务是否已解锁
+function addXp(n) { xp += n }
 const maxSpeed = () => (30 + 10 * up.engine) * (hull < 25 ? .6 : 1), fuelMax = () => 100 + 40 * up.tank,
   scanRange = () => 90 + 30 * up.scanner, scanTime = () => Math.max(1, 3 - .4 * up.scanner), energyMax = () => 100 + 30 * up.boost;
 let fuel = Math.min(save?.fuel ?? fuelMax(), fuelMax()), energy = energyMax();
@@ -55,7 +72,7 @@ function doSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
-      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
+      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, xp, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
 }
@@ -267,7 +284,7 @@ function buildSystem(sys) {
 // 主线：信号碎片信标。星系已经加载时，主线推进后也可以补建（避免邻居星系先加载导致信标缺失）
 function addStoryBeacon(S) {
   const sys = S.sys;
-  if (frags >= FRAG_N || fragKind(frags) !== 'beacon' || fragSys[frags] !== sys.i || S.beacons.some(b => b.story)) return;
+  if (!qOn() || fragKind(frags) !== 'beacon' || fragSys[frags] !== sys.i || S.beacons.some(b => b.story)) return;
   const lastD = S.planets[S.planets.length - 1].p.dist;
   const local = beaconSpot(sys, makeRng(sys.seed + 999), lastD + 10);
   const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(2.6), new THREE.MeshBasicMaterial({ color: 0x66e0ff, wireframe: true }));
@@ -305,7 +322,7 @@ function disposeSystem(s) {
 //  ② 主线星系：玩家 260u 内时额外保留，保证主线的行星/信标不会因为“最近恒星”变化而消失
 const LOAD_R = 140, UNLOAD_R = 190, ENTER_R = 110;
 let nearest = systems[0], nearestDist = 1e9, lastEntered = -1, primarySys = null, pinnedSys = null, arriveLock = null, arriveAt = new THREE.Vector3();
-const questSysIdx = () => frags < FRAG_N ? fragSys[frags] : -2;
+const questSysIdx = () => qOn() ?  fragSys[frags] : -2;
 function updateLOD() {
   let best = null, bd = 1e9;
   for (const s of systems) { const d = s.pos.distanceTo(ship.pos); s._d = d; if (d < bd) { bd = d; best = s } }
@@ -347,7 +364,7 @@ function updateLOD() {
     lastEntered = inside.i;
     const first = !visited.has(inside.i); visited.add(inside.i);
     const n = genPlanets(inside).filter(p => discovered.has(p.id)).length;
-    toast(`进入 ${inside.name} 星系 · ${first ? '首次到访 · ' : ''}已发现 ${n}/${inside.nPlanets}`, first ? 'good' : '');
+    toast(T.toast.enterSystem(inside.name, first, n, inside.nPlanets), first ? 'good' : '');
     const ns = genStars(inside).length; if (ns === 2) know('star2', 1500); else if (ns >= 3) know('star3', 1500);
   }
   markers.forEach((m, i) => m.visible = !loaded.some(L => L.sys.i === i));
@@ -398,84 +415,13 @@ $('bloomChk').checked = bloomOn;
 function setBloom(v, notify) {
   bloomOn = v; $('bloomChk').checked = v;
   try { localStorage.setItem('deepspace-bloom', v ? 'on' : 'off') } catch { }
-  if (notify) toast('辉光：' + (v ? '开' : '关'));
+  if (notify) toast(T.toast.bloom(v));
 }
 function toggleBloom() { setBloom(!bloomOn, true) }
 $('bloomChk').onchange = e => setBloom(e.target.checked, false);
 
 // ===== 游戏知识：第一次遇到时弹出 =====
-const FIG_STAR2 = `<svg class="kfig" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <radialGradient id="gA"><stop offset="0" stop-color="#fffbe8"/><stop offset=".35" stop-color="#ffd27a"/><stop offset="1" stop-color="#ffb04a" stop-opacity="0"/></radialGradient>
-    <radialGradient id="gB"><stop offset="0" stop-color="#f2faff"/><stop offset=".35" stop-color="#8fd0ff"/><stop offset="1" stop-color="#5fa8ff" stop-opacity="0"/></radialGradient>
-  </defs>
-  <circle cx="180" cy="75" r="62" fill="none" stroke="#7fd4ff" stroke-opacity=".35" stroke-dasharray="3 5"/>
-  <circle cx="180" cy="75" r="12" fill="none" stroke="#ffffff" stroke-opacity=".18"/>
-  <g><animateTransform attributeName="transform" type="rotate" from="0 180 75" to="360 180 75" dur="5s" repeatCount="indefinite"/>
-    <circle cx="171" cy="75" r="17" fill="url(#gA)"/><circle cx="195" cy="75" r="11" fill="url(#gB)"/></g>
-  <g><animateTransform attributeName="transform" type="rotate" from="0 180 75" to="360 180 75" dur="22s" repeatCount="indefinite"/>
-    <circle cx="242" cy="75" r="5" fill="#6fa8ff"/><circle cx="240.5" cy="73.5" r="1.8" fill="#cfe6ff"/></g>
-  <circle cx="180" cy="75" r="1.6" fill="#fff"/>
-  <text x="180" y="108" fill="#9fb4d6" font-size="9" text-anchor="middle">质心</text>
-  <text x="350" y="138" fill="#7fd4ff" font-size="10" text-anchor="end">行星轨道 ≥ 2.5 × 两星间距</text>
-</svg>`;
-const FIG_STAR3 = `<svg class="kfig" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid slice">
-  <defs>
-    <radialGradient id="gA3"><stop offset="0" stop-color="#fffbe8"/><stop offset=".35" stop-color="#ffd27a"/><stop offset="1" stop-color="#ffb04a" stop-opacity="0"/></radialGradient>
-    <radialGradient id="gB3"><stop offset="0" stop-color="#f2faff"/><stop offset=".35" stop-color="#8fd0ff"/><stop offset="1" stop-color="#5fa8ff" stop-opacity="0"/></radialGradient>
-    <radialGradient id="gC3"><stop offset="0" stop-color="#fff0e8"/><stop offset=".35" stop-color="#ff9a6a"/><stop offset="1" stop-color="#ff7a4a" stop-opacity="0"/></radialGradient>
-  </defs>
-  <circle cx="110" cy="75" r="200" fill="none" stroke="#ff9a6a" stroke-opacity=".25" stroke-dasharray="2 6"/>
-  <circle cx="110" cy="75" r="52" fill="none" stroke="#7fd4ff" stroke-opacity=".35" stroke-dasharray="3 5"/>
-  <circle cx="110" cy="75" r="30" fill="none" stroke="#ff7a7a" stroke-opacity=".28" stroke-dasharray="1 4"/>
-  <g><animateTransform attributeName="transform" type="rotate" from="0 110 75" to="360 110 75" dur="5s" repeatCount="indefinite"/>
-    <circle cx="101" cy="75" r="14" fill="url(#gA3)"/><circle cx="125" cy="75" r="9" fill="url(#gB3)"/></g>
-  <g><animateTransform attributeName="transform" type="rotate" from="0 110 75" to="360 110 75" dur="20s" repeatCount="indefinite"/>
-    <circle cx="162" cy="75" r="4.5" fill="#6fa8ff"/></g>
-  <circle cx="310" cy="75" r="16" fill="url(#gC3)"><animate attributeName="r" values="15;17;15" dur="4s" repeatCount="indefinite"/></circle>
-  <text x="310" y="108" fill="#ffb59a" font-size="9" text-anchor="middle">远处的第三颗</text>
-  <text x="110" y="140" fill="#9fb4d6" font-size="9" text-anchor="middle">内侧双星</text>
-  <text x="168" y="22" fill="#7fd4ff" font-size="10">稳定区（窄带）</text>
-</svg>`;
-
-function knowRich(K) {
-  return K.svg + `<div class="kbody"><h2>📖 ${K.t}</h2><div class="ktag">${K.tag}</div>
-    <div class="kchips">${K.chips.map(c => `<span class="kchip">${c}</span>`).join('')}</div>` +
-    K.sec.map(([ico, h, p, cls]) => `<div class="ksec ${cls || ''}"><div class="kico">${ico}</div><div><h4>${h}</h4><p>${p}</p></div></div>`).join('') +
-    `<div class="kfoot"><span class="hint">Enter / Space / Esc 关闭</span><button id="knowOk2">知道了</button></div></div>`;
-}
-const KNOW = {
-  star2: {
-    t: '双星系统', svg: FIG_STAR2, tag: '两颗恒星，一个共同的质心',
-    chips: ['恒星 ×2', '行星轨道 ≥ 2.5× 两星间距'],
-    sec: [
-      ['🌌', '这是什么', '两颗恒星并不是一颗绕着另一颗转，而是<b>一起围绕共同的质心</b>公转。质量越接近，就越像互相追逐。银河里大约有<b>一半</b>的类太阳恒星都有伴星，单星反而没那么"普通"。'],
-      ['🪐', '行星在哪里', '太近的轨道会被两颗恒星轮流拉扯而失稳，所以行星只能待在<b>离它们足够远</b>的地方，整体绕着质心转，游戏里是两星间距约 2.5 倍以外。现实中这类"环双星行星"已被发现，天空中会同时挂着<b>两个太阳</b>。'],
-      ['✨', '特别之处', '两颗恒星的类型可能不同，一颗橙黄、一颗蓝白，行星表面会有<b>两种颜色的光和影</b>。两颗星的相对位置不断变化，白天和黑夜也比单星复杂。'],
-      ['🚀', '游戏提示', '每颗恒星都可以靠近补充燃料，也都可能爆发<b>耀斑</b>。飞近任何一颗之前，先留意耀斑预警。', 'tip'],
-    ]
-  },
-  star3: {
-    t: '三星系统', svg: FIG_STAR3, tag: '一对紧密的恒星，和一颗遥远的伴星',
-    chips: ['恒星 ×3', '行星只能待在两条界线之间'],
-    sec: [
-      ['🌌', '这是什么', '稳定的三星系统几乎都是<b>层级式</b>的：两颗恒星紧紧相伴，第三颗在远处绕着这一对公转。三颗星地位平等地互相绕转极不稳定，往往很快就有一颗被抛出系统。半人马座 α 就是一个例子。'],
-      ['🪐', '一条窄带', '行星被夹在两条界线之间：<b>内侧</b>是紧密双星的搅动（太近会失稳），<b>外侧</b>是第三颗恒星的引力（太远会被扯走）。所以这里的行星往往挤在一条<b>较窄的轨道带</b>里。'],
-      ['✨', '特别之处', '天空中最多可以同时有三个"太阳"，亮度和颜色各不相同。远处那颗伴星看起来更像一颗特别亮的星，而不是太阳。'],
-      ['🚀', '游戏提示', '每颗恒星都可以靠近采集燃料，但也都可能爆发<b>耀斑</b>。这里有三颗恒星，可以挑离耀斑最远、最安全的那一颗靠近。行星彼此靠得近，常常可以一口气扫描完。', 'tip'],
-    ]
-  },
-  kind_rock: {
-    t: '岩石行星', h: `<p>有固体表面的类地行星，离恒星较近的行星大多是这一类。</p>
-    <p>主要由金属和硅酸盐构成，采样可得到<b>固体材料</b>（具体看卡片上的"资源"一栏）。有些还有大气，甚至生命，<b>样本价值越高</b>，奖励越多。</p>
-    <p>扫描岩石行星可补充 <b>10</b> 点燃料。</p>` },
-  kind_gas: {
-    t: '气态巨行星', h: `<p>主要由氢和氦组成，<b>没有固体表面</b>，体积大、质量大，常带有行星环和较多卫星。</p>
-    <p>它们是良好的燃料来源：扫描气态巨行星可补充 <b>25</b> 点燃料，比岩石行星多得多。</p>` },
-  kind_ice: {
-    t: '冰巨行星', h: `<p>类似天王星、海王星：厚厚的氢氦外层下面，是大量的<b>水、氨、甲烷</b>等"冰"。因为距离恒星很远，温度极低。</p>
-    <p>采样常得到<b>水冰、氨、甲烷冰</b>这类材料。扫描可补充 <b>10</b> 点燃料。</p>` },
-};
+const KNOW = T.know;
 let knowSeen = new Set(), knowQ = [];
 try { knowSeen = new Set(JSON.parse(localStorage.getItem('deepspace-know') || '[]')) } catch { }
 function know(key, delay = 0) {
@@ -488,8 +434,8 @@ function knowTry() {
   const key = knowQ.shift(); knowSeen.add(key);
   try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
   const K = KNOW[key], box = $('know').firstElementChild;
-  box.classList.toggle('rich', !!K.svg);   // 双星/三星用新版排版
-  box.innerHTML = K.svg ? knowRich(K) : `<h2>📖 ${K.t}</h2>${K.h}<div class="row" style="margin-top:12px"><button id="knowOk">知道了</button></div><p class="hint">Enter / Space / Esc 关闭</p>`;
+  box.classList.toggle('rich', !!K.fig);   // 双星/三星用新版排版
+  box.innerHTML = K.fig ? H.knowRich(K) : H.knowPlain(K);
   box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
   openPanel('know'); beep(520, .12, 'triangle', .04);
   if (knowQ.length) setTimeout(knowTry, 1000);
@@ -522,7 +468,7 @@ function showBig(i) {
   bigI = (i + bigList.length) % bigList.length;
   const im = bigList[bigI];
   $('cardimg').src = im.src; $('cardDl').href = im.src; $('cardDl').download = im.alt + '.png';
-  $('cardIdx').textContent = `${bigI + 1} / ${bigList.length}`;
+  $('cardIdx').textContent = T.cards.index(bigI + 1, bigList.length);
   $('cardbig').classList.remove('hidden');
 }
 $('cardPrev').onclick = () => showBig(bigI - 1);
@@ -531,18 +477,17 @@ function renderCards() {
   const ids = [...discovered].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
   const bySys = new Map(); ids.forEach(id => { const s = +id.split(':')[0]; bySys.set(s, (bySys.get(s) || 0) + 1) });
   $('cflt').innerHTML = [
-    `<option value="all">全部（${ids.length}）</option>`,
-    `<option value="cur">当前星系${curSysI >= 0 ? '：' + systems[curSysI].name : '（不在星系内）'}</option>`,
-    ...[...bySys].sort((a, b) => a[0] - b[0]).map(([s, n]) => `<option value="${s}">${systems[s].name}（${n}/${systems[s].nPlanets}）</option>`)
+    H.optionHtml('all', T.cards.all(ids.length)),
+    H.optionHtml('cur', T.cards.current(curSysI >= 0 ? systems[curSysI].name : '')),
+    ...[...bySys].sort((a, b) => a[0] - b[0]).map(([s, n]) => H.optionHtml(s, T.cards.system(systems[s].name, n, systems[s].nPlanets)))
   ].join('');
   $('cflt').value = cardFilter;
   const want = cardFilter === 'all' ? null : cardFilter === 'cur' ? curSysI : +cardFilter;
   const show = want === null ? ids : ids.filter(id => +id.split(':')[0] === want);
   $('cgrid').innerHTML = show.length ? show.map(id => {
     const [si, pi] = id.split(':').map(Number), p = genPlanets(systems[si])[pi];
-    return `<img src="${cardURL(p)}" alt="${p.name}">`
-  }).join('') : want === null ? '<p>还没有收藏。扫描行星后，它的卡片会出现在这里。</p>'
-    : want === -1 ? '<p>飞船当前不在任何星系内。</p>' : '<p>这个星系还没有收藏的卡片。</p>';
+    return H.cardImgHtml(cardURL(p), p.name)
+  }).join('') : H.emptyHtml(want === null ? T.cards.emptyAll : want === -1 ? T.cards.emptyNoSys : T.cards.emptySys);
   const imgs = [...$('cgrid').querySelectorAll('img')];
   imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) });
 }
@@ -568,14 +513,13 @@ function kindNote(p) {
   if (!KNOW[key] || knowSeen.has(key)) return '';
   knowSeen.add(key);
   try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
-  return `<div class="kinfo"><b>${KNOW[key].t}</b>${KNOW[key].h.replace(/<\/p>\s*$/, '<button id="cardOk">知道了（Enter）</button></p>')}</div>`;
+  return H.kindNoteHtml(KNOW[key]);
 }
 let cardAnim;
 let cardHold = false, cardHoldMs = 0;
 function showCard(p, isNew) {
   const i = p.info, c = $('card'), note = kindNote(p);
-  c.innerHTML = `<div style="position:relative"><img src="${cardURL(p)}" style="border-radius:10px;display:block;margin:0 auto 6px">${note}</div>` +
-    (isNew ? `<span class="v">+${i.value} 信用点 · +${i.fuelGain} 燃料 · 已收藏</span>` : '已收藏');
+  c.innerHTML = H.cardPop(cardURL(p), note, isNew ? H.cardReward(i.value, i.fuelGain) : T.cards.collected);
   c.classList.remove('hidden'); clearTimeout(cardTimer); cardAnim?.cancel();
   if (note) {   // 有介绍：留在中央，暂停游戏，等玩家关闭
     cardHold = true; cardHoldMs = 3600000; document.exitPointerLock?.(); mouseHeld = false;
@@ -600,24 +544,24 @@ function cycleTarget() {
   const list = systems.filter(s => s.pos.distanceTo(ship.pos) > 100).sort((a, b) => a.pos.distanceTo(ship.pos) - b.pos.distanceTo(ship.pos)).slice(0, 8);
   if (!list.length) return;
   const i = list.indexOf(target); target = list[(i + 1) % list.length];
-  toast(`目标：${target.name} · ${Math.round(target.pos.distanceTo(ship.pos))} u`); beep(880, .06);
+  toast(T.toast.target(target.name, Math.round(target.pos.distanceTo(ship.pos)))); beep(880, .06);
 }
 const ARRIVE = 90;
 function warpCost(t) { return Math.max(2, (t.pos.distanceTo(ship.pos) - ARRIVE) * .12) }
 function toggleWarp() {
   if (warp) { endWarp(false); return }
-  if (!target) { toast('先按 Tab 或在星图中选择目标恒星', 'warn'); return }
+  if (!target) { toast(T.toast.warpNoTarget, 'warn'); return }
   const d = target.pos.distanceTo(ship.pos);
-  if (d < ARRIVE + 30) { toast('已在目标附近'); return }
+  if (d < ARRIVE + 30) { toast(T.toast.warpNear); return }
   const cost = warpCost(target);
-  if (fuel < cost) { toast(`燃料不足：需要 ${cost.toFixed(0)}，当前 ${fuel.toFixed(0)}。靠近恒星或扫描气态巨行星可补充`, 'warn'); return }
-  fuel -= cost; warp = { target, arrive: ARRIVE }; beep(220, .5, 'sawtooth', .04); toast(`曲速启动 → ${target.name}（-${cost.toFixed(0)} 燃料）`);
+  if (fuel < cost) { toast(T.toast.warpNoFuel(cost.toFixed(0), fuel.toFixed(0)), 'warn'); return }
+  fuel -= cost; warp = { target, arrive: ARRIVE }; beep(220, .5, 'sawtooth', .04); toast(T.toast.warpStart(target.name, cost.toFixed(0)));
 }
 function endWarp(arrived) {
   if (!warp) return;
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat);
   ship.vel.copy(fwd).multiplyScalar(arrived ? 20 : Math.min(ship.vel.length(), maxSpeed()));
-  if (arrived) { toast(`抵达 ${warp.target.name}`, 'good'); beep(520, .2); if (target === warp.target) target = null }
+  if (arrived) { toast(T.toast.warpArrive(warp.target.name), 'good'); beep(520, .2); if (target === warp.target) target = null }
   warp = null;
 }
 
@@ -625,7 +569,6 @@ function endWarp(arrived) {
 // 扫描
 // =====================================================================
 // ---------- 远程探测 ----------
-const STAR_TYPES = ['G 型黄矮星', 'F 型黄白星', 'K 型橙矮星', 'A 型蓝白星', 'M 型红矮星'];
 const knows = s => visited.has(s.i) || probed.has(s.i);
 const probeCost = s => Math.round(3 + s.pos.distanceTo(ship.pos) / 100);
 function sysSummary(s) {
@@ -634,78 +577,86 @@ function sysSummary(s) {
   const unseen = ps.filter(p => !discovered.has(p.id)), value = unseen.reduce((a, p) => a + p.info.value, 0);
   const R2 = makeRng(s.seed + 777), nb = s.i === 0 ? 1 : R2.int(1, 2); let bc = 0;
   for (let k = 0; k < nb; k++)if (!beaconsGot.has(s.i + ':b' + k)) bc++;
-  const type = STAR_TYPES[Math.max(0, STAR_COLS.indexOf(s.color))] + ['', '（双星系统）', '（三星系统）'][genStars(s).length - 1],
-    quest = frags < FRAG_N && fragSys[frags] === s.i;
+  const type = T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] + T.sys.multi[genStars(s).length - 1],
+    quest = qOn() && fragSys[frags] === s.i;
   return {
     type, n: ps.length, gas, life: lifeList.length, best, value, bc, quest,
-    short: `${type} · 行星${ps.length} 气态${gas} 生命${lifeList.length} 信标${bc}${quest ? ' · ★先驱者信号' : ''}`,
-    text: `${type} · 行星 ${ps.length}（气态 ${gas}）· 生命迹象 ${lifeList.length}${best ? `（最高：${best}）` : ''} · 可获得约 ${value} 信用点 · 信标 ${bc}${quest ? ' · 检测到先驱者信号' : ''}`
+    short: T.sys.short(type, ps.length, gas, lifeList.length, bc, quest),
+    text: T.sys.text(type, ps.length, gas, lifeList.length, best, value, bc, quest)
   };
 }
 function probeTarget() {
   const t = target;
-  if (!t || t.i < 0) { toast('请先选择一颗恒星作为目标（Tab 或星图）', 'warn'); return }
-  if (knows(t)) { toast(`${t.name}：情报已掌握`); return }
+  if (!t || t.i < 0) { toast(T.toast.probeNoTarget, 'warn'); return }
+  if (knows(t)) { toast(T.toast.probeKnown(t.name)); return }
   const cost = probeCost(t);
-  if (fuel < cost) { toast(`燃料不足：远程探测需要 ${cost}，当前 ${fuel.toFixed(0)}`, 'warn'); return }
+  if (fuel < cost) { toast(T.toast.probeNoFuel(cost, fuel.toFixed(0)), 'warn'); return }
   fuel -= cost; probed.add(t.i);
   [520, 780].forEach((f, i) => beep(f, .15, 'sine', .05, i * .1));
-  toast(`探测完成 ${t.name}：${sysSummary(t).short}`, 'good'); doSave();
+  toast(T.toast.probeDone(t.name, sysSummary(t).short), 'good'); doSave();
 }
 let barKey = '';
 function renderMapBar() {
   const t = target, b = $('btnProbe'); let txt, btn, dis;
-  if (!t) { txt = '点击恒星设为目标'; btn = '远程探测 (R)'; dis = true }
-  else if (t.i < 0) { txt = '目标：银心奇点'; btn = '远程探测 (R)'; dis = true }
+  if (!t) { txt = T.map.barNone; btn = T.map.btnProbe; dis = true }
+  else if (t.i < 0) { txt = T.map.barBh; btn = T.map.btnProbe; dis = true }
   else {
     const d = Math.round(t.pos.distanceTo(ship.pos));
-    if (knows(t)) { txt = `${t.name} · ${d} u · ${sysSummary(t).text}`; btn = '情报已掌握'; dis = true }
-    else { txt = `${t.name} · ${d} u · 情报未知`; btn = `远程探测 R（-${probeCost(t)} 燃料）`; dis = fuel < probeCost(t) }
+    if (knows(t)) { txt = T.map.barKnown(t.name, d, sysSummary(t).text); btn = T.map.btnKnown; dis = true }
+    else { txt = T.map.barUnknown(t.name, d); btn = T.map.btnProbeCost(probeCost(t)); dis = fuel < probeCost(t) }
   }
   const key = txt + '|' + btn + '|' + dis; if (key === barKey) return; barKey = key;
   $('mapbarTxt').textContent = txt; b.textContent = btn; b.disabled = dis;
 }
 
 // ---------- 主线：银心信号 ----------
-const BH_SYS = { i: -1, name: '银心奇点', pos: new THREE.Vector3(0, 0, 0) };
+const BH_SYS = { i: -1, name: T.map.bh, pos: new THREE.Vector3(0, 0, 0) };
 const qV = new THREE.Vector3();
 function setQuestTarget() {
-  const n = frags < FRAG_N ? systems[fragSys[frags]] : (bhDone ? null : BH_SYS);
+  const n = qOn() ? systems[fragSys[frags]] : (bhOn() ? BH_SYS : null);
   target = (n && n.pos.distanceTo(ship.pos) > (n.i >= 0 ? 260 : 150)) ? n : null;
 }
 function questText() {
-  if (bhDone) return '主线已完成 · 自由探索';
-  if (frags >= FRAG_N) return `主线 ${FRAG_N}/${FRAG_N}：前往银心奇点，进入 ${BH_T.range} u 内扫描它（${Math.round(ship.pos.length())} u）`;
+  const Q = T.quest;
+  if (rank() < 1) {
+    const n = genPlanets(systems[0]).filter(p => discovered.has(p.id)).length;
+    return Q.training(systems[0].name, n, systems[0].nPlanets);
+  }
+  if (bhDone) return Q.done;
+  if (frags >= FRAG_N && !bhOn()) return Q.standbyFinal(RANKS[5].name, xp, RANK_NEED[rank()]);
+  if (frags < FRAG_N && !qOn()) return Q.standbyNext(frags + 1, RANKS[Math.min(5, rank() + 1)].name, xp, RANK_NEED[rank()]);
+  if (frags >= FRAG_N) return Q.final(Math.round(ship.pos.length()), BH_T.range);
+  const t = Q.tag(frags + 1, FRAG_N);
   const s = systems[fragSys[frags]], L = loaded.find(x => x.sys === s), here = !!L && s.pos.distanceTo(ship.pos) < 220;
   if (fragKind(frags) === 'planet') {
     const pn = s.name + ' ' + ROMAN[fragPlanetIdx(frags)];
-    return here ? `主线 ${frags}/${FRAG_N}：扫描 ${pn} 上的异常信号`
-      : `主线 ${frags}/${FRAG_N}：前往 ${s.name}（${Math.round(s.pos.distanceTo(ship.pos))} u），扫描 ${pn} 上的异常信号`;
+    return here ? Q.planetHere(t, pn) : Q.planetFar(t, s.name, Math.round(s.pos.distanceTo(ship.pos)), pn);
   }
   const sb = L && L.beacons.find(x => x.story);
-  if (here && sb) return `主线 ${frags}/${FRAG_N}：飞向青色信号碎片信标 ◈（${Math.round(qV.copy(sb.local).add(s.pos).distanceTo(ship.pos))} u）`;
-  return `主线 ${frags}/${FRAG_N}：前往 ${s.name}（${Math.round(s.pos.distanceTo(ship.pos))} u），寻找信号碎片信标`;
+  if (here && sb) return Q.beaconHere(t, Math.round(qV.copy(sb.local).add(s.pos).distanceTo(ship.pos)));
+  return Q.beaconFar(t, s.name, Math.round(s.pos.distanceTo(ship.pos)));
 }
 function collectFragment(keep = false) {
-  const k = frags; frags++; credits += 200; hull = HULL_MAX; fuel = fuelMax();
+  const k = frags; frags++; credits += 200; addXp(50); hull = HULL_MAX; fuel = fuelMax();
   [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
   const c = $('card');
-  const html = `<div style="font-size:17px;line-height:1.8"><h3>信号碎片 ${frags}/${FRAG_N}</h3><span class="v" style="font-size:13px">+200 信用点 · 船体与燃料完全恢复 · 信号发现距离 +10%</span><br><br>${FRAG_TEXT[k]}</div>`;
-  c.innerHTML = keep ? html + '<hr style="border:0;border-top:1px solid rgba(127,212,255,.25);margin:8px 0">' + c.innerHTML : html;
+  const html = H.fragPop(T.fragment.title(frags, FRAG_N), T.fragment.reward, FRAG_TEXT[k]);
+  c.innerHTML = keep ? html + H.popSep + c.innerHTML : html;
   c.classList.remove('hidden'); clearTimeout(cardTimer);
   if (!cardHold) {
     cardAnim?.cancel();
     cardAnim = flyIn(c, { hold: 6500, tail: 0, fade: true, scale: 1, endScale: 230 / c.offsetWidth });
     cardTimer = setTimeout(() => c.classList.add('hidden'), 7400);   // 250 + 6500 + 650
   }
-  toast(frags >= FRAG_N ? '七块碎片已集齐 —— 信号指向银心奇点' : `信号碎片 ${frags}/${FRAG_N} · 新的坐标已标记`, 'good');
+  toast(frags >= FRAG_N ? (bhOn() ? T.fragment.toastAll : T.fragment.toastAllLocked(RANKS[5].name))
+    : qOn() ? T.fragment.toastNext(frags, FRAG_N) : T.fragment.toastLocked(frags, FRAG_N), 'good');
   loaded.forEach(addStoryBeacon);   // 下一块碎片的星系若已加载，立即补建信标
   setQuestTarget(); doSave();
 }
 function showEnding() {
   bhDone = true; credits += 5000;
   const m = Math.floor(playTime / 60), s = Math.floor(playTime % 60);
-  $('endStats').innerHTML = `用时 ${m} 分 ${s} 秒 · 到访 ${visited.size}/${systems.length} 个恒星系 · 发现 ${discovered.size} 颗行星 · 信标 ${beaconsGot.size} 个<br>奖励 +5000 信用点`;
+  $('endStats').innerHTML = T.ending.stats(m, s, visited.size, systems.length, discovered.size, beaconsGot.size);
   [392, 523, 659, 784, 1047].forEach((f, i) => beep(f, .5, 'triangle', .06, i * .18));
   target = null; doSave(); openPanel('ending');
 }
@@ -713,28 +664,29 @@ function showEnding() {
 let scanT = 0, scanId = null, scanCand = null;
 // 扫描范围：扫描器等级 + 信号碎片奖励 + 额外加成
 // effR 30 = 30u 内扫描器可探测到的信标，range 90 = 90u 内扫描器可探测到的行星
-const BH_T = { id: 'bh', name: '银心奇点', effR: 30, range: 90 };
+const BH_T = { id: 'bh', name: T.map.bh, effR: 30, range: 90 };
 const USE = {
-  氢气: { label: '加注燃料 +15', fuel: 15 }, '氦-3': { label: '加注燃料 +40', fuel: 40 }, 甲烷冰: { label: '加注燃料 +25', fuel: 25 },
-  金属矿: { label: '修补船体 +20', hull: 20 }, 硅酸盐: { label: '修补船体 +10', hull: 10 },
+  氢气: { label: T.use.氢气, fuel: 15 }, '氦-3': { label: T.use['氦-3'], fuel: 40 }, 甲烷冰: { label: T.use.甲烷冰, fuel: 25 },
+  金属矿: { label: T.use.金属矿, hull: 20 }, 硅酸盐: { label: T.use.硅酸盐, hull: 10 },
 };
 const UPG_MAT = { engine: '稀土', tank: '水冰', scanner: '晶体', boost: '氦-3', cargo: '金属矿' };
 const matNeed = k => Math.ceil((up[k] + 1) / 2);
 function hit(v) {
+  if (rank() < 1) return;   // 实习生没有危险
   const d = Math.max(0, v - 15) * .6; if (d < 1) return;
-  hull = Math.max(0, hull - d); toast(`撞击！船体 -${d.toFixed(0)}（${hull.toFixed(0)}/${HULL_MAX}）`, 'warn'); beep(90, .25, 'sawtooth', .08);
+  hull = Math.max(0, hull - d); toast(T.toast.crash(d.toFixed(0), hull.toFixed(0), HULL_MAX), 'warn'); beep(90, .25, 'sawtooth', .08);
 }
 const PRICE = { 金属矿: 20, 硅酸盐: 15, 水冰: 20, 氢气: 15, 氨: 18, 甲烷冰: 22, 氨冰: 18, 稀土: 60, 晶体: 70, '氦-3': 80 };
 function takeSample(p) {
   if (sampled.has(p.id)) return;
   const want = Math.max(1, Math.round(p.radius)), n = Math.min(want, cargoMax() - cargoUsed());
-  if (n <= 0) { toast('货舱已满，无法采样（按 I 查看）', 'warn'); return }
+  if (n <= 0) { toast(T.toast.cargoFull, 'warn'); return }
   cargo[p.info.res] = (cargo[p.info.res] || 0) + n; sampled.add(p.id);
-  toast(`采样：${p.info.res} ×${n}${n < want ? '（货舱已满，只装下一部分）' : ''}`, 'good'); doSave();
+  toast(T.toast.sampled(p.info.res, n, n < want), 'good'); doSave();
 }
 const SIG = {
-  cache: { name: '补给信标', color: 0xffd27a, css: '#ffe27a' }, distress: { name: '求救信号', color: 0x7cf0a0, css: '#7cf0a0' },
-  ruins: { name: '遗迹信号', color: 0xc9a0ff, css: '#c9a0ff' }, decoy: { name: '干扰信号', color: 0xff7a7a, css: '#ff7a7a' },
+  cache: { name: T.sig.cache, color: 0xffd27a, css: '#ffe27a' }, distress: { name: T.sig.distress, color: 0x7cf0a0, css: '#7cf0a0' },
+  ruins: { name: T.sig.ruins, color: 0xc9a0ff, css: '#c9a0ff' }, decoy: { name: T.sig.decoy, color: 0xff7a7a, css: '#ff7a7a' },
 };
 const COMMON = ['金属矿', '硅酸盐', '水冰', '氢气', '氨', '甲烷冰'], RARE = ['稀土', '晶体', '氦-3'];
 function beaconInfo(sys, k) {
@@ -749,70 +701,53 @@ function giveItem(res, n) { const k = Math.min(n, cargoMax() - cargoUsed()); if 
 // 信标奖励：信用点 + 物资/燃料，干扰信号则扣除燃料和船体
 function claimBeacon(b) {
   const m = [0, 1, 1.5, 2][b.power], parts = []; let cr = 0, good = true;
-  if (b.type === 'cache') { cr = b.reward.credits * .4 * m; const n = giveItem(b.loot.res, Math.round(b.loot.n * m)); parts.push(n ? `${b.loot.res} ×${n}` : '货舱已满，物资丢失') }
-  else if (b.type === 'distress') { cr = b.reward.credits * m; const f = Math.round(30 * m); fuel = Math.min(fuelMax(), fuel + f); parts.push(`+${f} 燃料`) }
-  else if (b.type === 'ruins') { cr = b.reward.credits * 1.5 * m; const n = giveItem(b.loot.res, b.power); parts.push(n ? `${b.loot.res} ×${n}` : '货舱已满，遗物丢失') }
-  else { good = false; const f = 8 * b.power, h = 6 * b.power; fuel = Math.max(0, fuel - f); hull = Math.max(0, hull - h); parts.push(`燃料 -${f} · 船体 -${h}`) }
-  cr = Math.round(cr); credits += cr; beaconsGot.add(b.id);
-  toast(`${SIG[b.type].name} ${'▮'.repeat(b.power)}：${cr ? `+${cr} 信用点 · ` : ''}${parts.join(' · ')}`, good ? 'good' : 'warn');
+  if (b.type === 'cache') { cr = b.reward.credits * .4 * m; const n = giveItem(b.loot.res, Math.round(b.loot.n * m)); parts.push(n ? T.sig.item(b.loot.res, n) : T.sig.packLost) }
+  else if (b.type === 'distress') { cr = b.reward.credits * m; const f = Math.round(30 * m); fuel = Math.min(fuelMax(), fuel + f); parts.push(T.sig.fuelPlus(f)) }
+  else if (b.type === 'ruins') { cr = b.reward.credits * 1.5 * m; const n = giveItem(b.loot.res, b.power); parts.push(n ? T.sig.item(b.loot.res, n) : T.sig.relicLost) }
+  else { good = false; if (rank() < 1) parts.push(T.sig.trainingShield); else { const f = 8 * b.power, h = 6 * b.power; fuel = Math.max(0, fuel - f); hull = Math.max(0, hull - h); parts.push(T.sig.decoyHit(f, h)) } }
+  cr = Math.round(cr); credits += cr; beaconsGot.add(b.id); addXp(5);
+  toast(T.sig.got(SIG[b.type].name, '▮'.repeat(b.power), cr, parts), good ? 'good' : 'warn');
   if (good) { beep(990, .15, 'square', .04); beep(1320, .2, 'square', .04, .12) } else beep(140, .3, 'sawtooth', .06);
 }
 // ===== 新手教学：分阶段，满足条件就弹出对应的教学 =====
 const did = {}; let lookAcc = 0, tutFlash = 0, tutShown = 0, tutFin = 0;
-const K = k => `<span class="k">${k}</span>`;
-const MOVES = [['前进', 'W'], ['后退', 'S'], ['左移', 'A'], ['右移', 'D'], ['上升', 'Z'], ['下降', 'C'], ['左滚', 'Q'], ['右滚', 'E']];
-const chip = (done, txt) => done ? `<span class="k" style="white-space:nowrap">✔ ${txt}</span>` : `<span style="opacity:.55;white-space:nowrap">${txt}</span>`;
+const MOVES = T.tut.moves;   // [[名称, 按键], …]
 const explored = () => {   // 是否有某个星系的行星已经全部发现
   const n = {}; for (const id of discovered) { const si = id.split(':')[0]; n[si] = (n[si] || 0) + 1 }
   return systems.some(s => (n[s.i] || 0) >= s.nPlanets);
 };
 const canUpgrade = () => UPG.some(u => up[u.k] < 5 && credits >= upCost(u.k) && (!UPG_MAT[u.k] || (cargo[UPG_MAT[u.k]] || 0) >= matNeed(u.k)));
-const GALAXY_ACTS = [
-  [['ShiftLeft', 'ShiftRight'], `按 ${K('Shift')} 加速（消耗能量）`],
-  [['Tab'], `按 ${K('Tab')} 切换目标恒星`],
-  [['KeyR'], `按 ${K('R')} 远程探测选中的恒星（消耗燃料）`],
-  [['KeyM'], `按 ${K('M')} 打开星图，点击恒星也能设为目标`],
-  [['KeyG'], `按 ${K('G')} 启动曲速前往目标（消耗燃料）`],
-];
+const GALAXY_ACTS = T.tut.galaxyActs;
 const STAGES = [
   {   // 0 游戏开始：移动
-    name: '游戏开始', trigger: () => true, steps: [{
+    name: T.tut.stageNames[0], trigger: () => true, steps: [{
       reset: MOVES.map(x => 'Key' + x[1]), init: () => { lookAcc = 0 },
-      t: () => { const c = MOVES.map(([n, k]) => chip(did['Key' + k], `${n} ${k}`)); return `把每个动作都试一遍：<br>${[chip(lookAcc > 400, '转动视角 鼠标/方向键'), ...c.slice(0, 4)].join(' · ')}<br>${c.slice(4).join(' · ')}` },
+      t: () => H.tutMoves(lookAcc > 400, MOVES.map(x => !!did['Key' + x[1]])),
       ok: () => lookAcc > 400 && MOVES.every(x => did['Key' + x[1]])
     }]
   },
   {   // 1 完成第一次扫描：收藏与货舱
-    name: '完成第一次扫描', trigger: () => discovered.size >= 1, steps: [{
-      reset: ['KeyK', 'KeyI'],
-      t: () => `按 ${K('K')} 查看收藏的行星卡片，按 ${K('I')} 打开货舱，按 ${K('J')} 打开日志。`,
+    name: T.tut.stageNames[1], trigger: () => discovered.size >= 1, steps: [{
+      reset: ['KeyK', 'KeyI', 'KeyJ'],
+      t: () => H.tutScan(T.tut.scanChips.map(([code]) => !!did[code])),
       ok: () => did.KeyK && did.KeyI && did.KeyJ
     }]
   },
-  {
-    name: '完成一个星系', trigger: explored, steps: [{
+  {   // 2 完成一个星系
+    name: T.tut.stageNames[2], trigger: () => explored() && rank() >= 1, steps: [{
       reset: GALAXY_ACTS.flatMap(a => a[0]),
-      t: () => `这个星系的行星都发现了！该去下一个了。<br>把以下每个动作都试一遍：<br>${GALAXY_ACTS.map(([codes, txt]) => codes.some(c => did[c]) ? `<span style="color:#9fe8b0">✔ ${txt}</span>` : `☐ ${txt}`).join('<br>')}`,
+      t: () => H.tutGalaxy(GALAXY_ACTS.map(([codes]) => codes.some(c => did[c]))),
       ok: () => GALAXY_ACTS.every(([codes]) => codes.some(c => did[c]))
     }]
   },
   {   // 3 够升级了
-    name: '升级', trigger: canUpgrade, steps: [{
-      reset: ['KeyU'], t: `信用点和材料够升级一次了！按 ${K('U')} 打开升级。`, ok: () => did.KeyU
+    name: T.tut.stageNames[3], trigger: canUpgrade, steps: [{
+      reset: ['KeyU'], t: () => H.tutUpgrade(), ok: () => did.KeyU
     }]
   },
-  {   // 4 第一次收集信号
-    name: '第一次收集信号', trigger: () => beaconsGot.size >= 1 || frags >= 1, steps: [
-      {
-        reset: ['Enter'],
-        t: `你收集到了第一个信号！太空里的信号（◈ 标记）有四类：<br>
-        <span style="color:#ffe27a">补给</span>：资源<br>
-        <span style="color:#7cf0a0">求救</span>：燃料 + 信用点<br>
-        <span style="color:#c9a0ff">遗迹</span>：稀有资源 + 大量信用点<br>
-        <span style="color:#ff7a7a">干扰 ⚠</span>：陷阱，别靠近<br>
-        ▮▮▮ 表示强度，越强越远就能发现，奖励也越多。走近到一定距离才能识别类型。<br>
-        按 ${K('Enter')} 继续`, ok: () => did.Enter
-      },
+  {   // 4 第一次收集信标
+    name: T.tut.stageNames[4], trigger: () => beaconsGot.size >= 1 || frags >= 1, steps: [
+      { reset: ['Space'], t: () => H.tutBeacon(), ok: () => did.Space },
     ]
   },
 ];
@@ -830,7 +765,7 @@ function tutTick(dt) {
   if (tutCur < 0) {
     if (tutQueue.length) { tutCur = tutQueue.shift(); tutSub = 0; tutShown = 0; tutSave() }
     else {
-      if (tutFin > 0) { el.classList.remove('hidden', 'ok'); el.innerHTML = `<b>教学完成</b> · 按 ${K('H')} 随时查看全部操作与游戏说明`; if ((tutFin -= dt) <= 0) { tutOff = true; tutSave() } }
+      if (tutFin > 0) { el.classList.remove('hidden', 'ok'); el.innerHTML = H.tutFinished(); if ((tutFin -= dt) <= 0) { tutOff = true; tutSave() } }
       else el.classList.add('hidden');
       return
     }
@@ -849,20 +784,20 @@ function tutTick(dt) {
   const s = st.steps[tutSub];
   if (tutShown === 0) { for (const k of s.reset || []) delete did[k]; s.init?.() }   // 每一步开始时清掉之前的按键记录
   tutShown += dt;
-  el.innerHTML = `<small>新手教学 · ${st.name}${st.steps.length > 1 ? ` · ${tutSub + 1}/${st.steps.length}` : ''}</small><br>${typeof s.t === 'function' ? s.t() : s.t}`;
-  if (tutShown > 1.2 && s.ok()) { tutFlash = 1; tutShown = 0; el.classList.add('ok'); el.innerHTML = '✔ 完成'; beep(880, .12, 'triangle', .05) }
+  el.innerHTML = H.tutBox(st.name, tutSub + 1, st.steps.length, typeof s.t === 'function' ? s.t() : s.t);
+  if (tutShown > 1.2 && s.ok()) { tutFlash = 1; tutShown = 0; el.classList.add('ok'); el.innerHTML = T.tut.done; beep(880, .12, 'triangle', .05) }
 }
 const tutRestart = () => { tutOff = false; tutDone = []; tutCur = -1; tutSub = 0; tutQueue = []; tutFlash = 0; tutShown = 0; tutFin = 0; for (const k in did) delete did[k]; lookAcc = 0; tutSave() };
 $('tutChk').checked = !tutOff;
 $('tutChk').onchange = e => { if (e.target.checked) tutRestart(); else { tutOff = true; tutSave() } };
-$('tutReset').onclick = () => { tutRestart(); knowSeen.clear(); try { localStorage.removeItem('deepspace-know') } catch { } closePanel(); toast('教学已重新开始', 'good') };
+$('tutReset').onclick = () => { tutRestart(); knowSeen.clear(); try { localStorage.removeItem('deepspace-know') } catch { } closePanel(); toast(T.toast.tutRestart, 'good') };
 $('tutOff').onclick = () => { tutOff = true; tutSave(); closePanel(); $('tutor').classList.add('hidden') };
 // ===== 危险事件 =====
 let flare = null, flareCd = 20, beltAcc = 0, inBelt = false;
 const danger = () => 1 + .12 * frags;
 function hurt(d, why) {
   if (d < 1) return;
-  hull = Math.max(0, hull - d); toast(`${why}！船体 -${d.toFixed(0)}（${hull.toFixed(0)}/${HULL_MAX}）`, 'warn'); beep(90, .25, 'sawtooth', .08);
+  hull = Math.max(0, hull - d); toast(T.toast.hurt(why, d.toFixed(0), hull.toFixed(0), HULL_MAX), 'warn'); beep(90, .25, 'sawtooth', .08);
 }
 function wreck() {
   const h = systems[0]; let best = null, bm = -1e9;
@@ -874,7 +809,8 @@ function wreck() {
   ship.pos.copy(best); ship.vel.set(0, 0, 0); ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(best, h.pos, UP)); warp = null;
   for (const k of Object.keys(cargo)) { cargo[k] = Math.floor(cargo[k] / 2); if (cargo[k] <= 0) delete cargo[k] }
   credits = Math.round(credits * .9); hull = HULL_MAX * .5; fuel = Math.max(fuel, 30); flare = null; inBelt = false;
-  toast('船体失效！应急信标把你送回家园恒星：货舱物资损失一半，信用点 -10%', 'warn'); beep(110, .6, 'sawtooth', .07); doSave();
+  demote();  
+  toast(T.toast.wreck, 'warn'); beep(110, .6, 'sawtooth', .07); doSave();
 }
 // ---- 奇点潮汐 + 红屏 ----
 const TIDE_R = 160;                      // 潮汐区半径：进入后被拉向奇点、船体持续受损
@@ -886,12 +822,12 @@ function tide(dt) {
     tV.copy(bh.position).sub(ship.pos).normalize();
     ship.pos.addScaledVector(tV, 20 * tideDepth * tideDepth * dt);        // 拉力：越近越强
     hull = Math.max(0, hull - (1.5 + 5 * tideDepth * tideDepth) * dt);    // 船体持续受损
-    if (!inTide) { inTide = true; toast(`⚠ 进入奇点潮汐区：船体持续受损。进入 ${BH_T.range} u 内才能扫描`, 'warn'); beep(100, .4, 'sawtooth', .06) }
+    if (!inTide) { inTide = true; toast(T.toast.tideEnter(BH_T.range), 'warn'); beep(100, .4, 'sawtooth', .06) }
   } else if (inTide && d > TIDE_R * 1.05) inTide = false;
 }
 let hullWarned = false;
 function hullWarn() {
-  if (hull < HULL_MAX * .3) { if (!hullWarned) { hullWarned = true; toast(`⚠ 船体危急（${hull.toFixed(0)}/${HULL_MAX}）：再受损将被应急信标送回家园`, 'warn'); beep(180, .3, 'square', .05) } }
+  if (hull < HULL_MAX * .3) { if (!hullWarned) { hullWarned = true; toast(T.toast.hullCritical(hull.toFixed(0), HULL_MAX), 'warn'); beep(180, .3, 'square', .05) } }
   else if (hull > HULL_MAX * .4) hullWarned = false;   // 修好之后才会再次提示，避免在边界反复弹
 }
 function redFx() {
@@ -901,7 +837,30 @@ function redFx() {
   if (tideDepth > 0) a = Math.max(a, tideDepth * (.5 + .4 * Math.sin(t * (4 + 6 * tideDepth))));   // 潮汐：越近越亮越快
   $('redfx').style.opacity = Math.max(0, a).toFixed(2);
 }
+function welcomeTick() {   // 第一个移动教学完成（或教学已关闭）后，显示欢迎和训练目标
+  if (welcomed || !running || openP || cardHold) return;
+  if (!(tutOff || tutDone.includes(0))) return;
+  welcomed = true;
+  toast(T.rank.welcome(systems[0].name), 'good');
+}
+function promoTick() {   // 每帧检查：经验够了就弹出晋升（等收藏、卡片、其他面板都关了之后）
+  if (!running || rankTarget() <= rankSeen || openP || cardHold || collectPending || !$('card').classList.contains('hidden')) return;
+  rankSeen++;
+  const r = rankSeen, box = $('know').firstElementChild; box.classList.add('rich');
+  box.innerHTML = H.promoHtml({ rank: r, rankName: RANKS[r].name, nextName: RANKS[r + 1]?.name, xp, need: RANK_NEED[r] || 0, lo: RANK_NEED[r - 1], sysXp: SYS_XP[r] });
+  box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
+  openPanel('know'); [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
+  setQuestTarget(); loaded.forEach(addStoryBeacon); doSave();
+}
+const DROP_XP = [0, 200, 400, 750, 1500];   // 降到某军衔后的经验（下标 = 降级后的军衔：初/中/高/资深）
+function demote() {   // 被强制送回家园：降一级（最低初级），经验降到新军衔区间的中间值
+  const r = rank(), nr = Math.max(1, r - 1);
+  xp = Math.min(xp, DROP_XP[nr]); rankSeen = nr;
+  toast(r === nr ? T.rank.xpDropped(xp) : T.rank.demoted(RANKS[r].name, RANKS[nr].name, xp), 'warn');
+  setQuestTarget();
+}
 function hazards(dt) {
+  if (rank() < 1) { tideDepth = 0; flare = null; inBelt = false; return }   // 实习生：没有危险
   if (warp) { tideDepth = 0; return }
   if (hull <= 0) { wreck(); return }
   tide(dt);
@@ -909,42 +868,47 @@ function hazards(dt) {
   for (const L of loaded) for (const s of L.stars) { tV.copy(s.mesh.position).add(L.sys.pos); if (ship.pos.distanceTo(tV) < s.st.radius * 5) near = { pos: tV.clone(), r: s.st.radius * 5 } }
   if (flare) {
     flare.t -= dt;
-    if (flare.t <= 0) { if (ship.pos.distanceTo(flare.pos) < flare.r) { hurt(12 * danger(), '恒星耀斑'); energy = 0; fuel = Math.max(0, fuel - 5) } else toast('耀斑已避开', 'good'); flare = null; flareCd = 25 }
+    if (flare.t <= 0) { if (ship.pos.distanceTo(flare.pos) < flare.r) { hurt(12 * danger(), T.toast.hurtFlare); energy = 0; fuel = Math.max(0, fuel - 5) } else toast(T.toast.flareAvoided, 'good'); flare = null; flareCd = 25 }
   } else {
     flareCd -= dt;
-    if (near && flareCd <= 0 && Math.random() < .08 * danger() * dt) { flare = { t: 4, pos: near.pos, r: near.r }; toast('⚠ 耀斑预警：4 秒后爆发，快远离恒星！', 'warn'); beep(220, .3, 'square', .05) }
+    if (near && flareCd <= 0 && Math.random() < .08 * danger() * dt) { flare = { t: 4, pos: near.pos, r: near.r }; toast(T.toast.flareWarn, 'warn'); beep(220, .3, 'square', .05) }
   }
   let now = false;
   for (const L of loaded) {
     if (!L.belt || !L.belt.visible) continue;
     const { a, b } = L.belt.userData, rx = ship.pos.x - L.sys.pos.x, rz = ship.pos.z - L.sys.pos.z, ry = ship.pos.y - L.sys.pos.y, r = Math.hypot(rx, rz), v = ship.vel.length();
-    if (r > a - 1 && r < b + 1 && Math.abs(ry) < 4) { now = true; if (v > 12) { beltAcc += (v - 12) * .05 * danger() * dt; if (beltAcc >= 3) { hurt(beltAcc, '小行星撞击'); beltAcc = 0 } } }
+    if (r > a - 1 && r < b + 1 && Math.abs(ry) < 4) { now = true; if (v > 12) { beltAcc += (v - 12) * .05 * danger() * dt; if (beltAcc >= 3) { hurt(beltAcc, T.toast.hurtBelt); beltAcc = 0 } } }
   }
-  if (now && !inBelt) toast('进入小行星带：减速到 12 u/s 以下可安全通过', 'warn');
+  if (now && !inBelt) toast(T.toast.beltEnter, 'warn');
   inBelt = now;
 }
 function completeScan(c) {
   if (c.id === 'bh') {
-    if (bhDone) { toast('银心奇点：数据已记录'); return }
-    if (frags < FRAG_N) { toast(`奇点深处传来微弱的回响……（信号碎片 ${frags}/${FRAG_N}）`, 'warn'); beep(120, .5, 'sine', .06); return }
+    if (bhDone) { toast(T.toast.bhRecorded); return }
+    if (frags < FRAG_N) { toast(T.toast.bhEcho(frags, FRAG_N), 'warn'); beep(120, .5, 'sine', .06); return }
+    if (!bhOn()) { toast(T.toast.bhRank(RANKS[5].name), 'warn'); return }    
     showEnding(); return;
   }
   did.scan = true;
   const p = c.p, isNew = !discovered.has(p.id);
   if (isNew) {
+    addXp(10);
     discovered.add(p.id); credits += p.info.value; fuel = Math.min(fuelMax(), fuel + p.info.fuelGain);
-    toast(`发现 ${p.name} · +${p.info.value} 信用点`, 'good');
+        toast(T.toast.discovered(p.name, p.info.value), 'good');
     [660, 880, 1100].forEach((f, i) => beep(f, .18, 'triangle', .06, i * .09)); doSave();
     const sys = systems[+p.id.split(':')[0]];
     if (genPlanets(sys).every(q => discovered.has(q.id))) {
-      toast(`${sys.name} 星系已完成探索 · 即将打开收藏`, 'good');
-      setTimeout(() => { if (openP !== 'cards') { pendingFilter = String(sys.i); openPanel('cards') } }, 3500);
+      const gain = SYS_XP[rank()];
+      if (!doneSys.has(sys.i)) { doneSys.add(sys.i); addXp(gain) }
+      toast(T.toast.sysComplete(sys.name, gain), 'good');
+      collectPending = true;   // 晋升弹窗要等收藏关闭之后
+      setTimeout(() => { collectPending = false; if (openP !== 'cards') { pendingFilter = String(sys.i); openPanel('cards') } }, 3500);
     }
   } else beep(500, .1);
   takeSample(p);
   showCard(p, isNew);
   // 主线：当前碎片对应的异常行星（即使之前已扫描过，再扫一次也能取得碎片）
-  if (frags < FRAG_N && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags)) collectFragment(true);
+  if (qOn() && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags)) collectFragment(true);
 }
 
 // =====================================================================
@@ -1011,6 +975,7 @@ function update(dt) {
     // 最近的星系完整显示；若同时存在另一个星系，它只显示恒星和主线目标，避免轨道/行星互相重叠
     const full = L === cur;
     L.t += dt;
+    addStoryBeacon(L);   // 保险：主线信标缺失时每帧补建（条件不满足会立即返回）    
     for (const s of L.stars) {
       const a = s.st.phase + L.t * s.st.speed;
       s.mesh.position.set(Math.cos(a) * s.st.orbitR, 0, Math.sin(a) * s.st.orbitR);
@@ -1022,7 +987,7 @@ function update(dt) {
     for (const b of L.beacons) {
       tV.copy(b.local).add(L.sys.pos); b.d = tV.distanceTo(ship.pos);
       b.mesh.visible = (full || !!b.story) && b.d < detectR(b);
-      if (!b.story && !b.ided && b.d < idR(b)) { b.ided = true; const c = SIG[b.type].color; b.mesh.material.color.setHex(c); b.glow.material.color.setHex(c); if (b.type === 'decoy') toast('⚠ 检测到干扰信号：这是陷阱，别靠近', 'warn') }
+      if (!b.story && !b.ided && b.d < idR(b)) { b.ided = true; const c = SIG[b.type].color; b.mesh.material.color.setHex(c); b.glow.material.color.setHex(c); if (b.type === 'decoy') toast(T.toast.decoyDetected, 'warn') }
     }
     for (const pl of L.planets) { pl.show = full || isQuestPlanet(pl.p); pl.pivot.visible = pl.show }
     for (const pl of L.planets) {
@@ -1107,19 +1072,20 @@ function toScreen(pos) {
 
 function updateHUD() {
   $('credits').textContent = credits;
+  { const r = rank(), el = $('rankTxt'); if (el) el.innerHTML = H.rankStars(r) + T.rank.hud(RANKS[r].name, xp, RANK_NEED[r]) }
   $('cargoTxt').textContent = `${cargoUsed()}/${cargoMax()}`;
-  $('hullTxt').textContent = hull < HULL_MAX * .3 ? `受损 ${hull.toFixed(0)}/${HULL_MAX}` : `${hull.toFixed(0)}/${HULL_MAX}`;
+  $('hullTxt').textContent = hull < HULL_MAX * .3 ? T.hud.hullDamaged(hull.toFixed(0), HULL_MAX) : `${hull.toFixed(0)}/${HULL_MAX}`;
   $('hullBar').firstElementChild.style.width = hull / HULL_MAX * 100 + '%';
   $('discCount').textContent = discovered.size; $('bcCount').textContent = beaconsGot.size;
   $('fuelTxt').textContent = `${fuel.toFixed(0)}/${fuelMax()}`; $('fuelBar').firstElementChild.style.width = fuel / fuelMax() * 100 + '%';
-  $('energyTxt').textContent = boostLock ? '过热' : `${energy.toFixed(0)}/${energyMax()}`;
+  $('energyTxt').textContent = boostLock ? T.hud.boostHot : `${energy.toFixed(0)}/${energyMax()}`;
   $('energyBar').firstElementChild.style.width = energy / energyMax() * 100 + '%';
-  $('speedTxt').textContent = ship.vel.length().toFixed(0) + ' u/s' + (warp ? ' · 曲速' : '');
-  $('sysName').textContent = cur && cur.sys._d < 220 ? cur.sys.name + ' 星系' + ['', '（双星）', '（三星）'][genStars(cur.sys).length - 1] : '深空';
-  $('nearInfo').textContent = `最近恒星：${nearest.name} · ${Math.round(nearestDist)} u`;
-  $('tgtInfo').textContent = target ? `目标：${target.name} · ${Math.round(target.pos.distanceTo(ship.pos))} u · 曲速 -${warpCost(target).toFixed(0)} 燃料` : '目标：无（Tab 选择）';
+  $('speedTxt').textContent = ship.vel.length().toFixed(0) + ' u/s' + (warp ? T.hud.warpSuffix : '');
+  $('sysName').textContent = cur && cur.sys._d < 220 ? T.hud.sysName(cur.sys.name, genStars(cur.sys).length) : T.hud.deepSpace;
+  $('nearInfo').textContent = T.hud.nearest(nearest.name, Math.round(nearestDist));
+  $('tgtInfo').textContent = target ? T.hud.target(target.name, Math.round(target.pos.distanceTo(ship.pos)), warpCost(target).toFixed(0)) : T.hud.targetNone;
 
-  $('tgtProbe').textContent = target && target.i >= 0 ? (knows(target) ? '情报：' + sysSummary(target).short : `情报：未知 · 按 R 远程探测（-${probeCost(target)} 燃料）`) : '';
+  $('tgtProbe').textContent = target && target.i >= 0 ? (knows(target) ? T.hud.probeKnown(sysSummary(target).short) : T.hud.probeUnknown(probeCost(target))) : '';
   $('quest').textContent = questText();
 
   // 准星
@@ -1128,23 +1094,23 @@ function updateHUD() {
 
   // 提示
   let pr = '';
-  if (warp) pr = `曲速航行中 → ${warp.target.name}　<span class="k">S</span> / <span class="k">G</span> 取消`;
+  if (warp) pr = T.hud.promptWarp(warp.target.name);
   else if (scanCand) {
     const known = scanCand.p ? discovered.has(scanCand.p.id) : bhDone;
-    pr = `${scanCand.name}　${Math.round(scanCand.d)} u${known ? '（已记录）' : ''}<br>按住 <span class="k">鼠标左键</span> / <span class="k">F</span> 扫描`;
-  } else if (scooping) pr = '恒星采集中 · 燃料补充';
-  else if (document.pointerLockElement !== renderer.domElement && !openP) pr = '点击画面以控制飞船';
-  $('prompt').innerHTML = pr;
+    pr = T.hud.promptScan(scanCand.name, Math.round(scanCand.d), known);
+  } else if (scooping) pr = T.ui.scooping;
+  else if (document.pointerLockElement !== renderer.domElement && !openP) pr = T.ui.pointerLock;
+  $('prompt').innerHTML = H.kbd(pr);
 
   // 行星标签
   for (const L of loaded) {
     for (const pl of L.planets) {
       pl.mesh.getWorldPosition(tV); const d = tV.distanceTo(ship.pos), s = toScreen(tV), known = discovered.has(pl.p.id);
       if (s.behind || d > 450 || warp || !pl.show) { pl.label.style.display = 'none'; continue }
-      const sig = frags < FRAG_N && fragKind(frags) === 'planet' && pl.p.id === fragSys[frags] + ':' + fragPlanetIdx(frags);
+      const sig = qOn() && fragKind(frags) === 'planet' && pl.p.id === fragSys[frags] + ':' + fragPlanetIdx(frags);
       pl.label.style.display = 'block'; pl.label.className = (known ? 'ok ' : '') + (sig ? 'st' : '');
       pl.label.style.transform = `translate(${s.x}px,${s.y + pl.p.radius * 620 / d + 10}px) translate(-50%,0)`;
-      pl.label.innerHTML = (known ? `${pl.p.name}<br>${Math.round(d)} u` : `未知天体<br>${Math.round(d)} u`) + (sig ? '<br>◇ 异常信号' : '');
+      pl.label.innerHTML = (known ? T.hud.planetKnown(pl.p.name, Math.round(d)) : T.hud.planetUnknown(Math.round(d))) + (sig ? T.hud.planetSignal : '');
     }
     for (const b of L.beacons) {
       tV.copy(b.local).add(L.sys.pos); const d = tV.distanceTo(ship.pos), s = toScreen(tV);
@@ -1152,7 +1118,7 @@ function updateHUD() {
       b.label.style.display = 'block'; b.label.style.transform = `translate(${s.x}px,${s.y + 16}px) translate(-50%,0)`;
       const bars = b.story ? '' : ' ' + '▮'.repeat(b.power) + '▯'.repeat(3 - b.power);
       b.label.style.color = b.ided && !b.story ? SIG[b.type].css : '';
-      b.label.innerHTML = (b.story ? '◈ 信号碎片' : b.ided ? `◈ ${SIG[b.type].name}${b.type === 'decoy' ? ' ⚠' : ''}` : '◈ 未知信号') + bars + `<br>${Math.round(d)} u`;
+      b.label.innerHTML = (b.story ? T.sig.labelStory : b.ided ? T.sig.labelKnown(SIG[b.type].name, b.type === 'decoy') : T.sig.labelUnknown) + bars + `<br>${Math.round(d)} u`;
     }
     L.stars.forEach((x, k) => {   // 伴星标签：方便找到远处的第二、第三颗太阳
       if (!x.label) return;
@@ -1160,7 +1126,7 @@ function updateHUD() {
       if (sc.behind || d > 600 || warp) { x.label.style.display = 'none'; return }
       x.label.style.display = 'block';
       x.label.style.transform = `translate(${sc.x}px,${sc.y + x.st.radius * 620 / d + 12}px) translate(-50%,0)`;
-      x.label.innerHTML = `伴星 ${'ABC'[k]}<br>${Math.round(d)} u`;
+      x.label.innerHTML = T.hud.companion('ABC'[k], Math.round(d));
     });
   }
   // 主线信标指引：即使在屏幕外也会在边缘显示方向，避免找不到
@@ -1172,7 +1138,7 @@ function updateHUD() {
     const m = 48; x = Math.max(m, Math.min(innerWidth - m, x)); y = Math.max(m, Math.min(innerHeight - m, y));
     if (s.behind) { x = x < innerWidth / 2 ? m : innerWidth - m }
     bm.classList.remove('hidden'); bm.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
-    $('bmarkTxt').textContent = `信号碎片 ${Math.round(dB)}u`;
+    $('bmarkTxt').textContent = T.sig.markerStory(Math.round(dB));
   } else bm.classList.add('hidden');
   // 目标标记
   const tm = $('tmark');
@@ -1182,7 +1148,7 @@ function updateHUD() {
     const m = 40; x = Math.max(m, Math.min(innerWidth - m, x)); y = Math.max(m, Math.min(innerHeight - m, y));
     if (s.behind) { x = x < innerWidth / 2 ? m : innerWidth - m }
     tm.classList.remove('hidden'); tm.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
-    $('tmarkTxt').textContent = `${target.name} ${Math.round(target.pos.distanceTo(ship.pos))}u`;
+    $('tmarkTxt').textContent = T.hud.markerTarget(target.name, Math.round(target.pos.distanceTo(ship.pos)));
   } else tm.classList.add('hidden');
 }
 
@@ -1191,15 +1157,11 @@ function updateHUD() {
 // =====================================================================
 function renderJournal() {
   const ids = [...discovered].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
-  let total = 0;
-  const rows = ids.map(id => {
-    const [si, pi] = id.split(':').map(Number), p = genPlanets(systems[si])[pi]; total += p.info.value;
-    return `<tr><td>${p.name}</td><td>${({ rock: '岩石', gas: '气态', ice: '冰巨' })[p.kind]}</td><td>${p.info.atm}</td><td>${p.info.temp}°C</td><td>${p.info.res}</td><td>${p.info.life}</td><td>${p.info.value}</td></tr>`
-  }).join('');
-  const story = `<h3 style="margin:0 0 6px;color:var(--c2)">主线 · 银心信号 ${frags}/${FRAG_N}${bhDone ? ' · 已完成' : ''}</h3>` +
-    (frags ? '<ol style="opacity:.85;line-height:1.7;margin:0 0 12px;padding-left:20px">' + FRAG_TEXT.slice(0, frags).map(t => `<li>${t}</li>`).join('') + '</ol>' : '<p>尚未获得信号碎片。</p>');
-  $('jbody').innerHTML = story + `<p>已发现行星 <b>${ids.length}</b> 颗 · 到访恒星系 <b>${visited.size}/${systems.length}</b> · 信标 <b>${beaconsGot.size}</b> · 银心奇点 ${bhDone ? '✔' : '未扫描'} · 累计样本价值 <b style="color:var(--c2)">${total}</b></p>
-   ${ids.length ? `<table><tr><th>名称</th><th>类型</th><th>大气</th><th>温度</th><th>资源</th><th>生命</th><th>价值</th></tr>${rows}</table>` : '<p>还没有发现。飞近行星、瞄准并按住鼠标左键扫描。</p>'}`;
+  const planets = ids.map(id => { const [si, pi] = id.split(':').map(Number); return genPlanets(systems[si])[pi] });
+  $('jbody').innerHTML = H.journalHtml({
+    locked: rank() < 1, frags, total: FRAG_N, bhDone, fragTexts: FRAG_TEXT.slice(0, frags),
+    planets, visited: visited.size, systems: systems.length, beacons: beaconsGot.size, value: planets.reduce((a, p) => a + p.info.value, 0)
+  });
 }
 function renderCargo() {
   // 货舱
@@ -1207,40 +1169,34 @@ function renderCargo() {
   // 只显示数量大于 0 的物品
   const rows = Object.entries(cargo).filter(([, n]) => n > 0);
   // 物品列表：可使用或出售
-  $('cbody').innerHTML = rows.length ? '<table>' + rows.map(([k, n]) => {
+  $('cbody').innerHTML = H.cargoHtml(rows.map(([k, n]) => {
     const u = USE[k], useless = !u || (u.fuel && fuel >= fuelMax()) || (u.hull && hull >= HULL_MAX);
-    return `<tr><td>${k}</td><td>×${n}</td><td>${u ? `<button data-u="${k}" ${useless ? 'disabled' : ''}>${u.label}</button>` : '<span style="opacity:.6">仅可出售</span>'}</td>
-      <td><button data-r="${k}">出售 ${PRICE[k] ?? 10}/个</button></td></tr>`
-  }).join('') + '</table>' : '<p>货舱是空的。扫描行星时会自动采样。</p>';
+    return { name: k, n, label: u ? u.label : null, disabled: !!useless, price: PRICE[k] ?? 10 };
+  }));
   // 物品按钮事件
   $('cbody').querySelectorAll('button[data-u]').forEach(b => b.onclick = () => {
     const k = b.dataset.u, u = USE[k]; if (!cargo[k]) return;
     if (u.fuel) fuel = Math.min(fuelMax(), fuel + u.fuel); if (u.hull) hull = Math.min(HULL_MAX, hull + u.hull);
-    if (--cargo[k] <= 0) delete cargo[k]; beep(660, .12, 'triangle'); toast(`${k}：${u.label}`, 'good'); doSave(); renderCargo();
+    if (--cargo[k] <= 0) delete cargo[k]; beep(660, .12, 'triangle'); toast(T.toast.useItem(k, u.label), 'good'); doSave(); renderCargo();
   });
   // 出售按钮事件
   $('cbody').querySelectorAll('button[data-r]').forEach(b => b.onclick = () => {
     const k = b.dataset.r; credits += (cargo[k] || 0) * (PRICE[k] ?? 10); delete cargo[k]; beep(740, .15, 'triangle'); doSave(); renderCargo();
   });
 }
-const UPG = [
-  { k: 'engine', name: '引擎', desc: l => `巡航速度 ${30 + 10 * l} u/s` },
-  { k: 'tank', name: '燃料舱', desc: l => `燃料上限 ${100 + 40 * l}` },
-  { k: 'scanner', name: '扫描仪', desc: l => `扫描距离 ${90 + 30 * l} u · 耗时 ${Math.max(1, 3 - .4 * l).toFixed(1)} s` },
-  { k: 'cargo', name: '货舱', desc: l => `容量 ${20 + 10 * l}` },
-  { k: 'boost', name: '推进器', desc: l => `能量上限 ${100 + 30 * l} · 回复更快` },
-];
+const UPG = ['engine', 'tank', 'scanner', 'cargo', 'boost'].map(k => ({ k, name: T.upg[k].name, desc: T.upg[k].desc }));
 const upCost = k => Math.round(120 * Math.pow(up[k] + 1, 2));
 function renderUpg() {
   // 升级面板
   $('upgCr').textContent = credits;
   // 物品列表：可升级或已满级
-  $('ubody').innerHTML = '<table>' + UPG.map(u => {
-    const l = up[u.k], max = l >= 5, mat = UPG_MAT[u.k], need = matNeed(u.k), have = cargo[mat] || 0, can = credits >= upCost(u.k) && have >= need;
-    return `<tr><td>${u.name}</td><td class="pips">${'■'.repeat(l) + '□'.repeat(5 - l)}</td><td>${u.desc(l)}${max ? '' : ` → ${u.desc(l + 1)}`}</td>
-      <td>${max ? '' : `<span style="color:${have >= need ? '#9fe8b0' : '#ff9a9a'}">${mat} ${have}/${need}</span>${have < need && cargoUsed() >= cargoMax() ? ' <span style="opacity:.7">货舱已满，按 I 腾位</span>' : ''}`}</td>
-      <td><button data-k="${u.k}" ${max || !can ? 'disabled' : ''}>${max ? '已满级' : '升级 ' + upCost(u.k)}</button></td></tr>`
-  }).join('') + '</table>';
+  $('ubody').innerHTML = H.upgHtml(UPG.map(u => {
+    const l = up[u.k], mat = UPG_MAT[u.k], need = matNeed(u.k), have = cargo[mat] || 0;
+    return {
+      k: u.k, name: u.name, level: l, max: l >= 5, descNow: u.desc(l), descNext: u.desc(l + 1), mat, have, need,
+      cargoFull: cargoUsed() >= cargoMax(), can: credits >= upCost(u.k) && have >= need, cost: upCost(u.k)
+    };
+  }));
   // 升级按钮事件
   $('ubody').querySelectorAll('button[data-k]').forEach(b => b.onclick = () => {
     const k = b.dataset.k, c = upCost(k), mat = UPG_MAT[k], need = matNeed(k);
@@ -1275,12 +1231,12 @@ function drawMap() {
       if (sm.bc) { g.fillStyle = '#ffe27a'; g.beginPath(); g.arc(x - 7, y - 4, 2.2, 0, TAU); g.fill() }
     }
     if (s === target || s === mapHover) { g.strokeStyle = '#ffd27a'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, 9, 0, TAU); g.stroke() }
-    if (s.i === 0) { g.fillStyle = '#ffd27a'; g.font = '12px monospace'; g.fillText('H', x + 7, y - 6) }
-    if (frags < FRAG_N && s.i === fragSys[frags]) { g.fillStyle = '#ffd27a'; g.font = '16px monospace'; g.fillText('★', x - 7, y - 9) }
+    if (s.i === 0) { g.fillStyle = '#ffd27a'; g.font = '12px monospace'; g.fillText(T.map.home, x + 7, y - 6) }
+    if (qOn() && s.i === fragSys[frags]) { g.fillStyle = '#ffd27a'; g.font = '16px monospace'; g.fillText(T.map.quest, x - 7, y - 9) }
   }
-  if ((frags >= FRAG_N && !bhDone) || (target && target.i === -1)) {
+  if (bhOn() || (target && target.i === -1)) {
     g.strokeStyle = '#ffd27a'; g.lineWidth = 1.5; g.beginPath(); g.arc(mx(0), my(0), 11, 0, TAU); g.stroke();
-    g.fillStyle = '#ffd27a'; g.font = '12px monospace'; g.fillText('银心奇点', mx(0) + 14, my(0) + 4);
+    g.fillStyle = '#ffd27a'; g.font = '12px monospace'; g.fillText(T.map.bh, mx(0) + 14, my(0) + 4);
   }
   // 玩家
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat), px = mx(ship.pos.x), py = my(ship.pos.z), a = Math.atan2(fwd.z, fwd.x);
@@ -1297,16 +1253,16 @@ mapc.addEventListener('mousemove', e => {
   if (mapHover) {
     const s = mapHover, d = s.pos.distanceTo(ship.pos), kn = knows(s);
     tip.style.display = 'block'; tip.style.left = e.clientX + 14 + 'px'; tip.style.top = e.clientY + 14 + 'px';
-    let info = '未知 · 选中后可远程探测';
+    let info = T.map.tipUnknown;
     if (kn) {
       const sm = sysSummary(s), n = genPlanets(s).filter(p => discovered.has(p.id)).length;
-      info = `${sm.type}<br>行星 ${n}/${sm.n} 已发现 · 气态 ${sm.gas} · 生命迹象 ${sm.life}${sm.best ? `（${sm.best}）` : ''}<br>可获得约 ${sm.value} 信用点 · 信标 ${sm.bc}${sm.quest ? '<br>★ 检测到先驱者信号' : ''}`
+      info = T.map.tipInfo(sm.type, n, sm.n, sm.gas, sm.life, sm.best, sm.value, sm.bc, sm.quest)
     }
-    tip.innerHTML = `<b>${s.name}</b>${visited.has(s.i) ? ' · 已到访' : probed.has(s.i) ? ' · 已探测' : ''}<br>距离 ${Math.round(d)} u · 曲速 -${Math.max(2, (d - ARRIVE) * .12).toFixed(0)} 燃料<br>${info}`
+    tip.innerHTML = T.map.tipHead(s.name, visited.has(s.i) ? T.map.tipVisited : probed.has(s.i) ? T.map.tipProbed : '', Math.round(d), Math.max(2, (d - ARRIVE) * .12).toFixed(0)) + '<br>' + info
   }
   else tip.style.display = 'none';
 });
-mapc.addEventListener('click', e => { const s = mapHit(e); if (s) { target = s; toast('目标：' + s.name); beep(880, .06) } });
+mapc.addEventListener('click', e => { const s = mapHit(e); if (s) { target = s; toast(T.toast.targetSet(s.name)); beep(880, .06) } });
 
 // =====================================================================
 // 开始 / 循环
@@ -1316,15 +1272,12 @@ document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t === b));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== b.dataset.tab));
 });
-$('saveHint').textContent = save ? `检测到存档：${discovered.size} 颗行星 · ${credits} 信用点 · seed ${seed}` : `seed ${seed}`;
-$('btnStart').textContent = save ? '继续探险' : '开始探险';
+$('saveHint').textContent = save ? T.start.saveFound(discovered.size, credits, seed) : T.start.seedOnly(seed);
+$('btnStart').textContent = save ? T.start.btnContinue : T.start.btnNew;
 $('btnStart').onclick = () => {
   running = true; $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
   renderer.domElement.requestPointerLock?.(); beep(440, .1);
   setQuestTarget();
-  if (!save) {
-    toast(`主线：${systems[fragSys[0]].name} 星系检测到异常信号，目标已标记`, 'good');
-  }
 };
 $('btnEndClose').onclick = () => closePanel();
 $('btnProbe').onclick = probeTarget;
@@ -1340,8 +1293,9 @@ const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), .05);
+  if (running) { promoTick(); welcomeTick() }  
   if (running && !paused()) { update(dt); hazards(dt); redFx(); hullWarn(); tutTick(dt); updateHUD() }
-  else if (running) updateHUD();   // 面板打开时游戏暂停，但 HUD（燃料、船体、信用点）仍要同步  
+  else if (running) { updateHUD(); tutTick(dt) }   // 面板打开时游戏暂停，但 HUD 和教学提示仍要同步
   else if (!running) { // 开始界面：缓慢环视
     tQ.setFromEuler(tE.set(0, dt * .04, 0)); ship.quat.multiply(tQ); camera.quaternion.copy(ship.quat); updateLOD();
   }
