@@ -1,0 +1,55 @@
+/* =====================================================================
+   components.css —— 由 js/templates.js 生成的界面片段的样式
+   （晋升通知、教学里的表格、卡片弹窗、日志/货舱/升级里的小样式……）
+   想改外观（颜色、字号、间距）就改这里。
+   需要放在 style.css 之后加载：<link rel="stylesheet" href="css/components.css">
+   类名都以 c- 开头；知识介绍的排版（.kfig .kbody .ksec …）仍在 style.css。
+   ===================================================================== */
+
+/* ---------- 通用小工具（等同原来的行内样式，所以加了 !important） ---------- */
+.c-nw { white-space: nowrap !important }
+.c-todo { opacity: .55 !important }          /* 教学里还没完成的小标签 */
+.c-ok { color: #9fe8b0 !important }          /* 完成 / 材料足够 */
+.c-bad { color: #ff9a9a !important }         /* 材料不足 */
+.c-dim { opacity: .6 !important }
+.c-dim7 { opacity: .7 !important }
+.c-accent { color: var(--c2) !important }
+.c-mt12 { margin-top: 12px !important }
+.c-stars { letter-spacing: 1px; text-shadow: 0 0 6px currentColor }
+
+/* ---------- 卡片 / 信号碎片弹窗（屏幕中央） ---------- */
+#card .cardpop { position: relative }
+#card .cardpop img { border-radius: 10px; display: block; margin: 0 auto 6px }
+#card .fragpop { font-size: 17px; line-height: 1.8 }          /* 信号碎片正文字号 */
+#card .fragpop .v { font-size: 13px }                         /* 「+200 信用点…」那一行 */
+#card hr.c-sep { border: 0; border-top: 1px solid rgba(127, 212, 255, .25); margin: 8px 0 }
+
+/* ---------- 晋升通知 ---------- */
+/* 颜色由 templates.js 按军衔通过 --col / --col-glow / --col-fill 传入 */
+#know .kbody.c-promo { padding: 14px 28px 22px }
+#know .ktag.c-promo-tag { margin: 0; text-align: center; letter-spacing: .3em }
+#know .kbody h2.c-promo-rank { text-align: center; font-size: 27px; margin: 4px 0 12px; letter-spacing: .14em; color: var(--col); text-shadow: 0 0 18px var(--col-glow) }
+#know .c-promo-xp { display: flex; justify-content: space-between; font-size: 12px; opacity: .85; margin-bottom: 4px }
+#know .c-promo-bar { height: 7px; background: rgba(255, 255, 255, .12); border-radius: 4px; overflow: hidden; margin-bottom: 12px }
+#know .c-promo-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--col-fill), var(--col)) }
+/* 军衔徽章（星星）弹出动画 */
+@keyframes pbadge { from { opacity: 0; transform: scale(.2) rotate(-50deg) } to { opacity: 1; transform: none } }
+.pbadge { transform-box: fill-box; transform-origin: center; animation: pbadge .55s cubic-bezier(.2, 1.5, .4, 1) both }
+
+/* ---------- 新手教学：四类信标对照表 ---------- */
+#tutor .c-btbl { margin: 6px auto; text-align: left; border-collapse: collapse; line-height: 1.6 }
+#tutor .c-btbl td { padding: 3px 12px 3px 0 }
+#tutor .c-btbl td:first-child { padding: 3px 18px 3px 12px }
+#tutor .c-btbl tr + tr { border-top: 1px solid rgba(127, 212, 255, .2) }
+#tutor .c-btbl tr.head { opacity: .6; font-size: 12px }
+#tutor .c-btbl tr.head td { padding: 2px 12px 2px 0 }
+#tutor .c-btbl tr.head td:first-child { padding: 2px 18px 2px 12px }
+#tutor .c-sig-cache { color: #ffe27a }
+#tutor .c-sig-distress { color: #7cf0a0 }
+#tutor .c-sig-ruins { color: #c9a0ff }
+#tutor .c-sig-decoy { color: #ff7a7a }
+#tutor small.c-note { opacity: .6 }
+
+/* ---------- 日志 ---------- */
+#jbody h3.c-h3 { margin: 0 0 6px; color: var(--c2) }
+#jbody ol.c-list { opacity: .85; line-height: 1.7; margin: 0 0 12px; padding-left: 20px }
