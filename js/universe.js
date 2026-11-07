@@ -1,6 +1,8 @@
 // 程序化宇宙生成：星系、背景星、星云、恒星系、行星（纯函数，不依赖游戏状态）
 import * as THREE from 'three';
 import { TAU, GR, HOME_POS, ROMAN, STAR_COLS, LIFE_BONUS } from './constants.js';
+import { SOL, buildSolPlanets } from './real.js';
+import { sampleReal, buildRealStars, buildRealPlanets } from './realsystems.js';
 import { makeRng, lerp } from './rng.js';
 
 const SYL = ["ae", "ky", "or", "ven", "ta", "lu", "xi", "ra", "mo", "zen", "thal", "is", "ur", "no", "va", "kar", "el", "dra"];
@@ -55,12 +57,14 @@ export function genSystems(R, gal, count = 45) {
       const n = R.int(2, 3); name = ''; for (let k = 0; k < n; k++)name += R.pick(SYL);
       name = name[0].toUpperCase() + name.slice(1) + '-' + R.int(100, 999)
     } while (names.has(name));
-    if (home) name = 'Helios-001';
+    if (home) name = SOL.sysName;
     names.add(name);
     list.push({
       i: list.length, name, pos: new THREE.Vector3(...pos), seed: R.int(1, 1e9),
       color: R.pick(STAR_COLS), radius: R.uni(5.5, 9), nPlanets: home ? 7 : R.int(3, 8)
     });
+    // 家园 = 太阳系（上面的随机数照常取，其他星系不受影响）
+    if (home) Object.assign(list[0], { color: SOL.star.color, radius: SOL.star.radius, nPlanets: SOL.scanCount, real: 'sol', belt: SOL.belt });
   };
   mk(HOME_POS, true);
   const N = gal.pos.length / 3;
@@ -71,9 +75,63 @@ export function genSystems(R, gal, count = 45) {
     if (list.some(s => s.pos.distanceTo(p) < 150)) continue;
     mk([x, y * .3, z], false);
   }
+  sampleReal(list);   // 抽一批真实星系换进去（用独立随机数，其余宇宙不变）
+  applyCats(list);    // 本局类别：让一部分程序生成的星系变成这些类别
   return list;
 }
 
+// ---------- 现象类别（程序生成的星系）----------
+// 本局抽到的类别在 list.cats。约 45% 的生成星系变成其中一类（用独立随机数，没变的星系和以前完全一样）。
+// 星系上记 cats / cat；恒星外观在这里定，行星的改动在 genPlanets 里的 catTweak。
+function applyCats(list) {
+  const cats = list.cats || []; if (!cats.length) return;
+  const R = makeRng(list[1].seed + 9100);
+  for (const s of list) {
+    if (s.i === 0 || s.rid) continue;
+    if (R.rand() > .45) continue;
+    const c = R.pick(cats); s.cats = [c]; s.cat = c;
+    if (c === 'redDwarf') { s.color = STAR_COLS[4]; s.radius = +R.uni(4, 5.2).toFixed(2); s.flare = 2.5 }
+    if (c === 'redGiant') { s.color = [1, .52, .28]; s.radius = +R.uni(15, 18).toFixed(2); s.flare = .4 }
+    if (c === 'compact') s.nPlanets = R.int(5, 8);
+  }
+}
+const LAVA_PAL = [[.35, .1, .05], [1, .45, .1]], OCEAN_PAL = [[.08, .22, .55], [.2, .5, .8]];
+const valueOf = p => 50 + Math.round(p.radius * 12) + (LIFE_BONUS[p.info.life] || 0) + (['晶体', '稀土', '氦-3'].includes(p.info.res) ? 100 : 0) + (p.info.atm === '宜居' ? 100 : 0);
+// 按类别改行星：外观（palette / glow）、轨道、环境数值。用独立随机数。
+function catTweak(sys, planets, ns) {
+  const c = sys.cat, R = makeRng(sys.seed + 7771), n = planets.length;
+  const redo = (p, i) => { p.period = Math.pow(p.dist, 1.5) * .06; p.info = genInfo(p, makeRng(sys.seed + 8881 + i), ns) };
+  const fin = p => { p.info.value = valueOf(p) };
+  if (c === 'redDwarf') planets.forEach((p, i) => { if (ns === 1) p.dist -= 6; redo(p, i); p.info.temp -= 40; fin(p) });
+  else if (c === 'redGiant') planets.forEach((p, i) => { p.dist += 28; redo(p, i); p.info.temp += 170; fin(p) });
+  else if (c === 'hotJupiter') {
+    const p = planets[0]; Object.assign(p, { kind: 'gas', radius: R.uni(4.5, 5.5), ring: false, moons: R.int(0, 1), palette: [[.2, .2, .3], [.55, .35, .45]], glow: [.9, .35, .1], glowI: .35, cat: 'hotJupiter' });
+    if (ns === 1) p.dist = R.uni(19, 23);
+    redo(p, 0); Object.assign(p.info, { temp: R.int(600, 1100), atm: '浓厚（氢氦）', res: '氢气', life: '无', fuelGain: 25 }); fin(p);
+  } else if (c === 'lava') {
+    const p = planets[0]; Object.assign(p, { kind: 'rock', radius: R.uni(1.2, 2), ring: false, moons: 0, palette: LAVA_PAL, glow: [1, .35, .05], glowI: .6, cat: 'lava' });
+    if (ns === 1) p.dist = R.uni(18, 21);
+    redo(p, 0); Object.assign(p.info, { temp: R.int(900, 1800), atm: '无', res: '金属矿', life: '无' }); fin(p);
+  } else if (c === 'ocean') {
+    const rocks = planets.filter(p => p.kind === 'rock'), p = rocks.length ? R.pick(rocks) : planets[0];
+    Object.assign(p, { kind: 'rock', radius: R.uni(2.2, 3), ring: false, palette: OCEAN_PAL, cat: 'ocean' });
+    redo(p, p.idx); const L = R.rand();
+    Object.assign(p.info, { temp: R.int(5, 35), atm: '宜居', res: '水冰', life: L < .5 ? '微生物' : L < .8 ? '植物' : '动物' }); fin(p);
+  } else if (c === 'superEarth') {
+    for (const p of planets.slice(0, Math.min(2, n))) {
+      Object.assign(p, { kind: 'rock', radius: R.uni(2.5, 3.2), ring: false, cat: 'superEarth' });
+      redo(p, p.idx); p.info.g = +R.uni(1.6, 2.6).toFixed(2); p.info.atm = R.pick(['稀薄', '浓厚', '浓厚', '宜居']); fin(p); p.info.value += 60;
+    }
+  } else if (c === 'compact') {
+    const start = ns > 1 ? planets[0].dist : 16;
+    planets.forEach((p, i) => {
+      const rock = i < Math.ceil(n * .6);
+      Object.assign(p, { kind: rock ? 'rock' : 'ice', radius: rock ? R.uni(1, 2.2) : R.uni(2.4, 3.6), ring: false, moons: R.int(0, 1), dist: start + i * 8.5,
+        palette: rock ? R.pick([[[.6, .4, .3], [.8, .6, .4]], [[.3, .5, .8], [.3, .7, .4]], [[.55, .55, .55], [.75, .72, .7]]]) : R.pick([[[.4, .7, .9], [.6, .85, 1]], [[.3, .45, .85], [.5, .65, .95]]]) });
+      redo(p, i); fin(p);
+    });
+  }
+}
 function genInfo(p, R, ns = 1) {
   let atm, res, life = '无', temp = Math.round(190 - p.dist * 2.8 + (ns - 1) * 45 + R.gauss(0, 45));
   if (p.kind === 'ice') temp -= 60;
@@ -95,7 +153,8 @@ function genInfo(p, R, ns = 1) {
 const starCache = {};
 export function genStars(sys) {
   if (starCache[sys.i]) return starCache[sys.i];
-  const R = makeRng(sys.seed + 31337), u = R.rand(), n = sys.i === 0 ? 1 : u < .6 ? 1 : u < .9 ? 2 : 3;
+  if (sys.rid) return starCache[sys.i] = buildRealStars(sys);   // 真实星系：恒星按真实数据（单星/双星）
+  const R = makeRng(sys.seed + 31337), u = R.rand(), n = sys.i === 0 ? 1 : sys.cat === 'circumbinary' ? 2 : u < .6 ? 1 : u < .9 ? 2 : 3;
   const mk = first => ({ color: first ? sys.color : R.pick(STAR_COLS), radius: first ? sys.radius : R.uni(4.5, 8), orbitR: 0, speed: 0, phase: 0 });
   const stars = [mk(true)];
   for (let k = 1; k < n; k++) stars.push(mk(false));
@@ -119,6 +178,8 @@ export function genStars(sys) {
 const planetCache = {};
 export function genPlanets(sys) {
   if (planetCache[sys.i]) return planetCache[sys.i];
+  if (sys.real === 'sol') return planetCache[sys.i] = buildSolPlanets(sys);   // 真实星系：用真实数据
+  if (sys.rid) return planetCache[sys.i] = buildRealPlanets(sys, genStars(sys));
   const R = makeRng(sys.seed), planets = [], stars = genStars(sys), ns = stars.length;
   const extent = ns > 1 ? Math.max(...stars.slice(0, 2).map(s => s.orbitR + s.radius)) : 0;
   let dist = 16 + (ns > 1 ? extent - 6 : 0);   // 多星系统行星轨道外移
@@ -151,5 +212,6 @@ export function genPlanets(sys) {
     };
     p.info = genInfo(p, R, ns); planets.push(p);
   }
+  if (sys.cat) catTweak(sys, planets, ns);
   return planetCache[sys.i] = planets;
 }

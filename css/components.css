@@ -15,7 +15,6 @@
 .c-dim7 { opacity: .7 !important }
 .c-accent { color: var(--c2) !important }
 .c-mt12 { margin-top: 12px !important }
-.c-stars { letter-spacing: 1px; text-shadow: 0 0 6px currentColor }
 
 /* ---------- 卡片 / 信号碎片弹窗（屏幕中央） ---------- */
 #card .cardpop { position: relative }
@@ -48,8 +47,42 @@
 #tutor .c-sig-distress { color: #7cf0a0 }
 #tutor .c-sig-ruins { color: #c9a0ff }
 #tutor .c-sig-decoy { color: #ff7a7a }
-#tutor small.c-note { opacity: .6 }
 
 /* ---------- 日志 ---------- */
 #jbody h3.c-h3 { margin: 0 0 6px; color: var(--c2) }
 #jbody ol.c-list { opacity: .85; line-height: 1.7; margin: 0 0 12px; padding-left: 20px }
+
+/* ---------- 数据来源标签（实测 / 推测 / 生成）与「真实」徽章 ---------- */
+.c-tag-m { color: #7fe0a0 }
+.c-tag-e { color: #ffd27a }
+.c-tag-g { color: #8fa3c4 }
+.c-real { font-size: 11px; color: #7fe0a0; border: 1px solid rgba(127, 224, 160, .5); border-radius: 3px; padding: 0 4px; margin-left: 4px }
+.c-real.c-guess { color: #ffd27a; border-color: rgba(255, 210, 122, .5) }
+
+/* ---------- 知识库面板（按 L；和知识弹窗共用 #know 浮层） ---------- */
+#know .box.lib { max-width: 900px; width: min(94vw, 900px); padding: 0; overflow: hidden }
+.c-lib { display: grid; grid-template-columns: 220px 1fr; height: min(76vh, 640px) }
+.c-lib-list { border-right: 1px solid rgba(127, 212, 255, .25); overflow: auto; padding: 10px 0 }
+.c-lib-count { padding: 2px 16px 8px; font-size: 12px; color: var(--c2); letter-spacing: .08em }
+.c-lib-list h3 { margin: 10px 16px 4px; font-size: 11.5px; letter-spacing: .2em; font-weight: 400; opacity: .55 }
+.c-lib-it { display: flex; justify-content: space-between; align-items: center; padding: 5px 16px; cursor: pointer; font-size: 14px }
+.c-lib-it:hover { background: rgba(127, 212, 255, .08) }
+.c-lib-it.on { background: rgba(127, 212, 255, .16); color: #fff }
+.c-lib-new { font-size: 10px; font-weight: 400; color: #05101f; background: #ffd27a; border-radius: 8px; padding: 0 6px }
+.c-lib-detail { overflow: auto }
+.c-lib-empty { padding: 24px }
+#know .c-lib-hint { margin: 0; padding: 6px 16px; border-top: 1px solid rgba(127, 212, 255, .2) }
+@media (max-width: 640px) { .c-lib { grid-template-columns: 1fr; height: 78vh } .c-lib-list { border-right: 0; border-bottom: 1px solid rgba(127, 212, 255, .25); max-height: 190px } }
+
+/* ---------- 真实星系：系统补充块（放在通用知识弹窗里）和资料说明 ---------- */
+#know .c-sysblock { margin: 12px 0; border: 1px dashed rgba(127, 212, 255, .6); border-radius: 8px; padding: 8px 12px; background: rgba(127, 212, 255, .05) }
+#know .c-sysblock h3 { margin: 0 0 2px; font-size: 16px; color: var(--c2) }
+#know .c-sysblock p { margin: 4px 0 2px }
+#know .c-ksrc { margin-top: 14px; padding-top: 8px; border-top: 1px solid rgba(127, 212, 255, .2); font-size: 12px; opacity: .65; line-height: 1.6 }
+
+/* 收藏夹标签：行星卡 / 星系全景 */
+.c-ctabs { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap }
+.c-ctabs button { background: rgba(127, 212, 255, .08); border: 1px solid rgba(127, 212, 255, .3); color: #9fb4d6; padding: 4px 12px; border-radius: 6px; cursor: pointer; font: inherit }
+.c-ctabs button.on { background: rgba(127, 212, 255, .22); color: #e8f1ff; border-color: rgba(127, 212, 255, .7) }
+.c-ctabs .c-shot { margin-left: auto }
+#cgrid.pano { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) }

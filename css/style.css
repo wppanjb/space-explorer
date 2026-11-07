@@ -4,7 +4,7 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#d6e8ff;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Microsoft YaHei",monospace;user-select:none}
 canvas{display:block}
 .hidden{display:none!important}
-.box{background:var(--bg);backdrop-filter:blur(8px);border:1px solid var(--bd);border-radius:10px;padding:10px 14px}
+.box{background:var(--bg);backdrop-filter:blur(8px);border:3px groove var(--bd);border-radius:10px;padding:10px 14px}
 
 /* HUD */
 #hud{position:fixed;inset:0;pointer-events:none;font-size:12.5px}
@@ -12,6 +12,7 @@ canvas{display:block}
 #tl b{color:#fff;font-size:15px;letter-spacing:.08em}
 #tr{position:absolute;right:16px;top:14px;text-align:right;line-height:1.7}
 #tr .cr{color:var(--c2);font-size:17px}
+#tr #rankTxt { font-size: 13px;  }
 #bl{position:absolute;left:16px;bottom:16px;width:230px}
 .bar{height:7px;background:rgba(255,255,255,.12);border-radius:4px;overflow:hidden;margin:3px 0 9px}
 .bar i{display:block;height:100%;width:50%;background:var(--c)}
@@ -53,7 +54,7 @@ canvas{display:block}
 
 /* overlays */
 .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,6,.72);z-index:20}
-.overlay .box{max-width:720px;width:min(92vw,720px);max-height:86vh;overflow:auto;padding:22px 26px;background:rgba(8,14,32,.9)}
+.overlay .box{max-width:720px;width:min(92vw,720px);max-height:86vh;overflow:auto;padding:22px 26px;background:rgba(39, 51, 94, 0.62)}
 .overlay h1{margin:0 0 4px;letter-spacing:.18em;font-size:26px;color:#fff}
 .overlay h2{margin:0 0 12px;letter-spacing:.12em;color:#fff}
 .overlay p{opacity:.8;line-height:1.7;margin:6px 0}

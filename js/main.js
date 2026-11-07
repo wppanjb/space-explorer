@@ -9,9 +9,10 @@ import { VERSION, TAU, GR, ROMAN, STAR_COLS, SAVE_KEY, FRAG_N, FRAG_TEXT, LIFE_B
 import { mulberry32, makeRng, lerp } from './rng.js';
 import { genGalaxy, genBackground, genNebulae, genSystems, genPlanets, genStars } from './universe.js';
 import { genFragments, fragKind } from './story.js';
+import { byId, figPlanets } from './realsystems.js';
 import { beep } from './audio.js';
 import { soft, disc, planetTexture, pointCloud } from './graphics.js';
-import { drawPlanetCard } from './cards.js';
+import { drawPlanetCard, drawSysPanorama } from './cards.js';
 import { T } from './text.js';
 import * as H from './templates.js';
 
@@ -42,24 +43,34 @@ const up = Object.assign({ engine: 0, tank: 0, scanner: 0, boost: 0, cargo: 0 },
 const discovered = new Set(save?.discovered || []);
 const beaconsGot = new Set(save?.beacons || []);
 const visited = new Set(save?.visited || []);
+for (const id of [...discovered]) { const [si, pi] = id.split(':').map(Number); const sy = systems[si]; if (!sy || !(pi < genPlanets(sy).length)) discovered.delete(id) }   // 旧存档里已不存在的行星（比如以前补的推测行星）直接去掉
 const probed = new Set(save?.probed || []);
 let bhDone = !!save?.ended;
 let frags = Math.min(FRAG_N, save?.frags ?? 0), playTime = save?.playTime ?? 0;
 // ===== 军衔与经验 =====
 const RANK_QUESTS = [0, 1, 2, 4, 7, 7];   // 各军衔已解锁的主线数量
 const RANKS = T.rankNames.map((name, i) => ({ name, quests: RANK_QUESTS[i] }));
-const RANK_NEED = [100, 300, 500, 1000, 2000];   // 升到下一级所需的【累计】经验
-const SYS_XP = [30, 50, 100, 200, 300, 300];      // 各军衔「完成一个星系」得到的经验（实习生/初级/中级/高级/资深/特级）
+const RANK_NEED = [150, 500, 1100, 2000, 3400];   // 升到下一级所需的【累计】经验
+const OLD_NEED = [100, 300, 500, 1000, 2000];     // 旧版（xpv 1）门槛，只用来迁移旧存档
+const PLANET_XP = p => p.cat ? 25 : p.kind === 'rock' ? 8 : 12;   // 首次扫描行星：特别类别最多，岩石最少
+const XP = { unlock: 15, beacon: 8, frag: 100, bh: 300, pano: 10 };
 const rankOf = x => RANK_NEED.filter(n => x >= n).length;
-const doneSys = new Set(save?.done ?? (save ? systems.filter(s => genPlanets(s).every(p => discovered.has(p.id))).map(s => s.i) : []));
+const panos = save?.panos || {};   // 星系全景图：星系编号 → { t 拍摄时间, ids 拍摄时已扫描的行星, star 主恒星是否已扫描 }
+const starsDone = new Set(save?.stars || []);   // 已扫描过主恒星的星系
+const doneSys = new Set(save?.done ?? (save ? systems.filter(s => genPlanets(s).every(p => p.home || discovered.has(p.id))).map(s => s.i) : []));
 let xp = save?.xp ?? (save ? discovered.size * 10 + beaconsGot.size * 5 + frags * 50 + doneSys.size * 30 : 0);   // 旧存档按已有进度估算
 const rankTarget = () => doneSys.has(0) ? rankOf(xp) : 0;     // 经验够了的军衔（家园星系没扫完前一直是实习生）
-let rankSeen = save?.rankSeen ?? (save ? rankTarget() : 0);   // 玩家已被授予的军衔：晋升弹窗之后才会提高
+let rankSeen = save?.rankSeen ?? (save ? ((save.xpv || 1) >= 2 ? rankTarget() : (doneSys.has(0) ? OLD_NEED.filter(n => xp >= n).length : 0)) : 0);   // 玩家已被授予的军衔：晋升弹窗之后才会提高
+if (save && (save.xpv || 1) < 2) {   // 旧存档：军衔不变，经验按在本级里的进度折算到新门槛
+  const r = rankSeen, lo = r ? OLD_NEED[r - 1] : 0, hi = OLD_NEED[r], nlo = r ? RANK_NEED[r - 1] : 0;
+  xp = hi == null ? Math.max(xp, RANK_NEED[4]) : Math.round(nlo + Math.max(0, Math.min(.99, (xp - lo) / (hi - lo))) * (RANK_NEED[r] - nlo));
+}
 let collectPending = false, welcomed = !!save;   // 新游戏：移动教学完成后再显示欢迎
 const rank = () => rankSeen;
 const qOn = () => frags < FRAG_N && frags < RANKS[rank()].quests;   // 下一块碎片是否已解锁
 const bhOn = () => frags >= FRAG_N && !bhDone && rank() >= 5;        // 奇点任务是否已解锁
 function addXp(n) { xp += n }
+const sysGain = s => s.i === 0 ? 80 : 40 + 5 * genPlanets(s).filter(p => !p.home).length;   // 完成星系：固定 40 + 每颗行星 5（不随军衔增长）；太阳系训练固定 80
 const maxSpeed = () => (30 + 10 * up.engine) * (hull < 25 ? .6 : 1), fuelMax = () => 100 + 40 * up.tank,
   scanRange = () => 90 + 30 * up.scanner, scanTime = () => Math.max(1, 3 - .4 * up.scanner), energyMax = () => 100 + 30 * up.boost;
 let fuel = Math.min(save?.fuel ?? fuelMax(), fuelMax()), energy = energyMax();
@@ -72,7 +83,7 @@ function doSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
-      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, xp, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
+      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, xp, xpv: 2, stars: [...starsDone], panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
 }
@@ -217,7 +228,7 @@ function buildSystem(sys) {
   const orbits = [], planets = genPlanets(sys).map(p => {
     const pivot = new THREE.Group(); g.add(pivot);
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(p.radius, 48, 48),
-      new THREE.MeshStandardMaterial({ map: planetTexture(p), roughness: .9, metalness: 0 }));
+      new THREE.MeshStandardMaterial({ map: planetTexture(p), roughness: .9, metalness: 0, ...(p.glow ? { emissive: new THREE.Color(...p.glow), emissiveMap: planetTexture(p), emissiveIntensity: p.glowI } : {}) }));   // 熔岩 / 热木星：自己发光
     orbitPos(p, solveE(p.phase, p.ecc), mesh.position);
     mesh.rotation.z = p.tilt; pivot.add(mesh);
     pivot.rotation.set(p.inc, p.node, 0, 'YXZ');
@@ -228,10 +239,12 @@ function buildSystem(sys) {
     }
     const moons = [];
     for (let i = 0; i < p.moons; i++) {
-      const mp = new THREE.Group(); mesh.add(mp);
-      const m = new THREE.Mesh(new THREE.SphereGeometry(p.radius * (.13 + .07 * i), 16, 16),
+      const mp = new THREE.Group(); mesh.add(mp); mp.rotation.y = i * 2.4;   // 起始角度错开，卫星多时不会排成一条线
+      // 前 4 颗按原来的大小和间距；第 5 颗起是小卫星，间距压紧（真实的巨行星有几十到上百颗卫星，大多很小）
+      const big = i < 4, rad = big ? .13 + .07 * i : .07, dist = big ? 2.2 + i * .9 : 4.9 + (i - 3) * .18;
+      const m = new THREE.Mesh(new THREE.SphereGeometry(p.radius * rad, big ? 16 : 8, big ? 16 : 8),
         new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 1 }));
-      m.position.x = p.radius * (2.2 + i * .9); mp.add(m); moons.push({ pivot: mp, speed: 2.5 / (1 + i * .6) })
+      m.position.x = p.radius * dist; mp.add(m); moons.push({ pivot: mp, speed: 2.5 / (1 + i * .6) })
     }
     const pts = []; for (let i = 0; i <= 256; i++) {
       const a = i / 256 * TAU;
@@ -245,10 +258,10 @@ function buildSystem(sys) {
   });
 
   let belt = null;
-  if (planets.length >= 4) {
+  if (sys.belt || planets.length >= 4) {   // 太阳系的带在火星与木星之间（sys.belt），其他星系在第 3 颗行星外
     // 小行星带：在第 3 颗行星轨道外，随机分布在两条半径之间
     // a = 内半径，b = 外半径，随机分布在 a~b 之间
-    const a = planets[2].p.dist + 6, b = planets[2].p.dist + 12;
+    const a = sys.belt ? sys.belt[0] : planets[2].p.dist + 6, b = sys.belt ? sys.belt[1] : planets[2].p.dist + 12;
     belt = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.35, 0), new THREE.MeshStandardMaterial({ color: 0x8a8070, roughness: 1 }), 700);
     const rng = mulberry32(sys.seed), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
     for (let i = 0; i < 700; i++) {
@@ -364,8 +377,9 @@ function updateLOD() {
     lastEntered = inside.i;
     const first = !visited.has(inside.i); visited.add(inside.i);
     const n = genPlanets(inside).filter(p => discovered.has(p.id)).length;
-    toast(T.toast.enterSystem(inside.name, first, n, inside.nPlanets), first ? 'good' : '');
-    const ns = genStars(inside).length; if (ns === 2) know('star2', 1500); else if (ns >= 3) know('star3', 1500);
+    const catName = inside.cat ? T.sys.cats[inside.cat] : '', extra = inside.rid ? T.toast.realInfo(inside.ly, catName) : catName;   // 真实星系：短提示（名字、距离、类别）
+    toast(T.toast.enterSystem(inside.name, first, n, inside.nPlanets, extra), first ? 'good' : '');
+    enterKnow(inside, genStars(inside).length);
   }
   markers.forEach((m, i) => m.visible = !loaded.some(L => L.sys.i === i));
 }
@@ -374,8 +388,8 @@ function updateLOD() {
 // 输入
 // =====================================================================
 const keys = {}; let mouseDX = 0, mouseDY = 0, mouseHeld = false, running = false, openP = null;
-const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards'), cargo: $('cargo'), help: $('help'), know: $('know') };
-const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards' || openP === 'cargo' || openP === 'help' || openP === 'know' || cardHold;
+const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards'), cargo: $('cargo'), help: $('help'), know: $('know'), lib: $('know') };   // 知识库和弹窗共用同一个浮层
+const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards' || openP === 'cargo' || openP === 'help' || openP === 'know' || openP === 'lib' || cardHold;
 addEventListener('keydown', e => {
   if (!running) return;
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
@@ -392,7 +406,9 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyH') openPanel('help');
   if (e.code === 'KeyK') openPanel('cards');
   if (e.code === 'KeyI') openPanel('cargo');
+  if (e.code === 'KeyL') openPanel('lib');
   if (paused()) return;
+  if (e.code === 'KeyP') shootPano();
   if (e.code === 'Tab') cycleTarget();
   if (e.code === 'KeyR') probeTarget();
   if (e.code === 'KeyG') toggleWarp();
@@ -422,20 +438,68 @@ $('bloomChk').onchange = e => setBloom(e.target.checked, false);
 
 // ===== 游戏知识：第一次遇到时弹出 =====
 const KNOW = T.know;
-let knowSeen = new Set(), knowQ = [];
+let knowSeen = new Set(), knowQ = [], knowSup = {};   // knowSup[key] = 弹这条通用介绍时，要附带的系统条目   // knowSeen = 弹过没有（重置教学会清空）；下面的 libSet = 知识库解锁了哪些（重置教学不碰）
+const kbParam = params.get('kb');   // 测试用：?kb=reset 清空知识库和弹窗记录；?kb=all 全部解锁（弹窗记录不变，仍会弹）
+if (kbParam === 'reset') try { ['deepspace-know', 'deepspace-lib', 'deepspace-libseen'].forEach(k => localStorage.removeItem(k)) } catch { }
 try { knowSeen = new Set(JSON.parse(localStorage.getItem('deepspace-know') || '[]')) } catch { }
+let libSet = new Set(), libSeen = new Set(), libCur = null;
+try { libSet = new Set(JSON.parse(localStorage.getItem('deepspace-lib') || '[]')) } catch { }
+try { libSeen = new Set(JSON.parse(localStorage.getItem('deepspace-libseen') || '[]')) } catch { }
+knowSeen.forEach(k => { if (KNOW[k]) libSet.add(k) });   // 老玩家已经看过的条目直接解锁
+if (kbParam === 'all') Object.keys(KNOW).forEach(k => { if (KNOW[k]?.title) libSet.add(k) });
+const saveLib = () => { try { localStorage.setItem('deepspace-lib', JSON.stringify([...libSet])); localStorage.setItem('deepspace-libseen', JSON.stringify([...libSeen])) } catch { } };
+// 取一条知识：真实星系的条目要按当前游戏里的行星补上标签和示意图
+function knowOf(key) {
+  const K = KNOW[key];
+  if (!key.startsWith('sys_') || !K) return K;
+  const d = byId(key.slice(4)), sys = systems.find(s => s.rid === d.id), U = T.know.sysUi, n = d.planets.length;
+  return { ...K, figHtml: H.orbitFig({ star: d.star, star2: d.star2, planets: figPlanets(d, sys ? genPlanets(sys) : null) }),
+    chips: [U.chipLy(d.ly), d.star2 ? U.chipBinary(d.star.type) : U.chipStar(d.star.type), U.chipPl(n)] };
+}
+function unlock(key, quiet) {   // 解锁一条知识库条目（quiet：不提示，由调用方自己提示）
+  if (!KNOW[key] || libSet.has(key)) return;
+  const first = libSet.size === 0; libSet.add(key); saveLib(); addXp(XP.unlock);   // 第一次解锁一条知识库条目 +15 经验
+  if (first && !quiet) setTimeout(() => toast(T.toast.libFirst, 'good'), 1200);
+}
+function renderLib() {
+  const box = $('know').firstElementChild; box.classList.remove('rich'); box.classList.add('lib');
+  const groups = T.lib.groups.map(g => ({ name: g.name, items: g.keys.filter(k => libSet.has(k)).map(k => ({ key: k, title: KNOW[k].title, isNew: !libSeen.has(k) })) })).filter(g => g.items.length);
+  const all = groups.flatMap(g => g.items);
+  if (!all.some(i => i.key === libCur)) libCur = (all.find(i => i.isNew) || all[0])?.key ?? null;
+  if (libCur && !libSeen.has(libCur)) { libSeen.add(libCur); saveLib() }   // 打开的那条不再算「新」
+  box.innerHTML = H.libHtml({ groups: groups.map(g => ({ ...g, items: g.items.map(i => ({ ...i, isNew: i.isNew && i.key !== libCur })) })), cur: libCur, count: all.length, detail: libCur ? H.knowDetail(knowOf(libCur)) : '' });
+  box.querySelectorAll('.c-lib-it').forEach(el => el.onclick = () => { libCur = el.dataset.key; renderLib() });
+}
 function know(key, delay = 0) {
   if (!KNOW[key] || knowSeen.has(key) || knowQ.includes(key)) return;
   knowQ.push(key); setTimeout(knowTry, delay);
 }
+// 进入星系：可能同时触发好几条知识（红矮星 / 红巨星 / 紧凑多行星 / 双星 / 三星）。一次只弹一个窗口，其余静默解锁。
+function enterKnow(sys, ns) {
+  const keys = [...new Set([...['redDwarf', 'redGiant', 'compact'].filter(c => sys.cats?.includes(c)).map(c => 'cat_' + c), ns === 2 ? 'star2' : ns >= 3 ? 'star3' : null, sys.i === 0 ? null : ['star_G', 'star_F', 'star_K', 'star_blue', 'cat_redDwarf'][STAR_COLS.indexOf(sys.color)]])]   // 恒星类型介绍：按主星的颜色（太阳系的太阳不触发；红矮星色的星也算红矮星）
+    .filter(k => k && KNOW[k] && !knowSeen.has(k) && !knowQ.includes(k));
+  const sk = sys.rid ? 'sys_' + sys.rid : null, sysNew = !!(sk && KNOW[sk] && !knowSeen.has(sk) && !knowQ.includes(sk));
+  if (!keys.length && !sysNew) return;
+  if (!keys.length) { know(sk, 1500); return }   // 通用介绍都看过了：只弹这个系统自己的介绍
+  if (sysNew) knowSup[keys[0]] = sk;             // 否则弹通用介绍，把系统补充块附在里面
+  know(keys[0], 1500);
+  const rest = keys.slice(1);
+  if (rest.length) {
+    rest.forEach(k => { knowSeen.add(k); unlock(k, true) });
+    try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
+    setTimeout(() => toast(T.toast.libMore(rest.length), 'good'), 1800);
+  }
+}
 function knowTry() {
   if (!knowQ.length) return;
-  if (openP || !running) { setTimeout(knowTry, 1000); return }   // 有别的面板开着就稍后再弹
-  const key = knowQ.shift(); knowSeen.add(key);
+  if (openP || !running || cardHold) { setTimeout(knowTry, 1000); return }   // 有别的面板开着就稍后再弹
+  const key = knowQ.shift(); knowSeen.add(key); unlock(key);
+  const supKey = knowSup[key]; delete knowSup[key];
+  if (supKey) { knowSeen.add(supKey); unlock(supKey, true) }
   try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
-  const K = KNOW[key], box = $('know').firstElementChild;
-  box.classList.toggle('rich', !!K.fig);   // 双星/三星用新版排版
-  box.innerHTML = K.fig ? H.knowRich(K) : H.knowPlain(K);
+  const K = knowOf(key), box = $('know').firstElementChild, rich = !!(K.fig || K.figHtml);
+  box.classList.remove('lib'); box.classList.toggle('rich', rich);   // 带示意图的用新版排版
+  box.innerHTML = rich ? H.knowRich(K, false, supKey ? H.sysBlock(knowOf(supKey)) : '') : H.knowPlain(K);
   box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
   openPanel('know'); beep(520, .12, 'triangle', .04);
   if (knowQ.length) setTimeout(knowTry, 1000);
@@ -446,6 +510,7 @@ function openPanel(n) {
   document.exitPointerLock?.(); mouseHeld = false;
   if (n === 'journal') renderJournal();
   if (n === 'cards') { cardFilter = pendingFilter; pendingFilter = 'all'; renderCards() }
+  if (n === 'lib') renderLib();
   if (n === 'upg') renderUpg(); if (n === 'cargo') renderCargo();
 }
 function closePanel() { if (openP) { panels[openP].classList.add('hidden'); openP = null } }
@@ -473,9 +538,53 @@ function showBig(i) {
 }
 $('cardPrev').onclick = () => showBig(bigI - 1);
 $('cardNext').onclick = () => showBig(bigI + 1);
+// ---- 星系全景图 ----
+const panoCache = new Map();
+function panoURL(i) {
+  const s = panos[i], key = i + ':' + s.t;
+  if (!panoCache.has(key)) {
+    const sys = systems[i], st = genStars(sys), pl = genPlanets(sys), P = T.pano, done = pl.filter(p => !p.home && s.ids.includes(p.id)).length, tot = pl.filter(p => !p.home).length;
+    panoCache.set(key, drawSysPanorama(sys, st, pl, s.ids, {
+      title: P.title(sys.name), sub: starTypeText(sys) + T.sys.multi[st.length - 1],
+      starLabel: s.star ? P.starKnown(starClassOf(sys)) : P.starUnknown, count: P.count(done, tot),
+      date: new Date(s.t).toLocaleString('zh-CN', { hour12: false }), src: sys.rid || sys.real ? P.srcReal : P.srcGen, srcCol: sys.rid || sys.real ? '#7fe0a0' : '#8fa3c4'
+    }).toDataURL('image/png'));
+  }
+  return panoCache.get(key);
+}
+function starTypeText(s) { return s.rid ? byId(s.rid).star.type + ' 型恒星' : s.cat === 'redGiant' ? T.sys.redGiant : T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] }
+function shootPano() {
+  if (curSysI < 0) { toast(T.pano.noSys, 'warn'); return }
+  const sys = systems[curSysI], pl = genPlanets(sys), first = !panos[sys.i];
+  panos[sys.i] = { t: Date.now(), ids: pl.filter(p => p.home || discovered.has(p.id)).map(p => p.id), star: starsDone.has(sys.i) };
+  const done = pl.filter(p => !p.home && discovered.has(p.id)).length, tot = pl.filter(p => !p.home).length;
+  if (first) addXp(XP.pano);
+  toast(T.pano.shot(sys.name, done, tot, first ? XP.pano : 0), 'good'); beep(1200, .06, 'square', .04); beep(800, .1, 'square', .04, .07);
+  const n = Object.keys(panos).length, mile = first && PANO_MILE[n];
+  if (mile) { credits += mile; setTimeout(() => toast(T.pano.mile(n, mile), 'good'), 1600) }
+  const fl = document.createElement('div'); fl.style.cssText = 'position:fixed;inset:0;background:#fff;opacity:.7;pointer-events:none;z-index:50;transition:opacity .5s'; document.body.appendChild(fl);
+  requestAnimationFrame(() => { fl.style.opacity = 0; setTimeout(() => fl.remove(), 600) }); doSave();
+  if (openP === 'cards') renderCards();
+}
+const PANO_MILE = { 5: 200, 10: 500, 20: 1000 };   // 收集到这么多个星系的全景图时，一次性奖励的信用点
+let cardTab = 'planets';
+(() => {   // 收藏夹顶部的标签：行星卡 / 星系全景（用代码插入，不需要改 index.html）
+  const box = $('cflt').parentElement; box.insertAdjacentHTML('beforebegin', `<div id="ctabs" class="c-ctabs"><button data-t="planets">${T.pano.tabPlanets}</button><button data-t="pano">${T.pano.tabPano}</button><button id="panoShot" class="c-shot">${T.pano.shoot}</button></div>`);
+  $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.onclick = () => { cardTab = b.dataset.t; b.blur(); renderCards() });
+  $('panoShot').onclick = e => { e.target.blur(); shootPano() };
+})();
 function renderCards() {
-  const ids = [...discovered].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
-  const bySys = new Map(); ids.forEach(id => { const s = +id.split(':')[0]; bySys.set(s, (bySys.get(s) || 0) + 1) });
+  $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === cardTab));
+  $('cflt').parentElement.style.display = cardTab === 'pano' ? 'none' : ''; $('cgrid').classList.toggle('pano', cardTab === 'pano');
+  if (cardTab === 'pano') {
+    const list = Object.keys(panos).map(Number).sort((a, b) => a - b);
+    $('cgrid').innerHTML = list.length ? list.map(i => H.cardImgHtml(panoURL(i), systems[i].name + ' 全景')).join('') : H.emptyHtml(T.pano.empty);
+    const imgs = [...$('cgrid').querySelectorAll('img')]; imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) }); return;
+  }
+  // 出发点（地球）一开始就已知，卡片自动收藏，但不计入「已发现」的行星数
+  const homeIds = genPlanets(systems[0]).filter(p => p.home).map(p => p.id);
+  const ids = [...new Set([...discovered, ...homeIds])].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
+  const bySys = new Map(); ids.forEach(id => { const s = +id.split(':')[0]; bySys.set(s, (bySys.get(s) || 0) + (homeIds.includes(id) ? 0 : 1)) });
   $('cflt').innerHTML = [
     H.optionHtml('all', T.cards.all(ids.length)),
     H.optionHtml('cur', T.cards.current(curSysI >= 0 ? systems[curSysI].name : '')),
@@ -509,9 +618,9 @@ function flyIn(el, { hold = 2200, fly = 650, tail = 3900, scale = 1.35, endScale
 
 // 第一次扫描某类行星：返回要显示在卡片上的介绍（只出现一次）
 function kindNote(p) {
-  const key = 'kind_' + p.kind;
+  const key = p.cat ? 'cat_' + p.cat : 'kind_' + p.kind;   // 特别的类别（热木星等）优先，普通的岩石 / 气态 / 冰巨介绍留到扫描普通行星时
   if (!KNOW[key] || knowSeen.has(key)) return '';
-  knowSeen.add(key);
+  knowSeen.add(key); unlock(key);
   try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
   return H.kindNoteHtml(KNOW[key]);
 }
@@ -572,12 +681,12 @@ function endWarp(arrived) {
 const knows = s => visited.has(s.i) || probed.has(s.i);
 const probeCost = s => Math.round(3 + s.pos.distanceTo(ship.pos) / 100);
 function sysSummary(s) {
-  const ps = genPlanets(s), gas = ps.filter(p => p.kind === 'gas').length, lifeList = ps.filter(p => p.info.life !== '无');
+  const ps = genPlanets(s).filter(p => !p.home), gas = ps.filter(p => p.kind === 'gas').length, lifeList = ps.filter(p => p.info.life !== '无');
   let best = '', bv = -1; for (const p of lifeList) { const v = LIFE_BONUS[p.info.life] || 0; if (v > bv) { bv = v; best = p.info.life } }
   const unseen = ps.filter(p => !discovered.has(p.id)), value = unseen.reduce((a, p) => a + p.info.value, 0);
   const R2 = makeRng(s.seed + 777), nb = s.i === 0 ? 1 : R2.int(1, 2); let bc = 0;
   for (let k = 0; k < nb; k++)if (!beaconsGot.has(s.i + ':b' + k)) bc++;
-  const type = T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] + T.sys.multi[genStars(s).length - 1],
+  const type = (s.rid ? byId(s.rid).star.type + ' 型恒星' : s.cat === 'redGiant' ? T.sys.redGiant : T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))]) + T.sys.multi[genStars(s).length - 1],
     quest = qOn() && fragSys[frags] === s.i;
   return {
     type, n: ps.length, gas, life: lifeList.length, best, value, bc, quest,
@@ -637,7 +746,7 @@ function questText() {
   return Q.beaconFar(t, s.name, Math.round(s.pos.distanceTo(ship.pos)));
 }
 function collectFragment(keep = false) {
-  const k = frags; frags++; credits += 200; addXp(50); hull = HULL_MAX; fuel = fuelMax();
+  const k = frags; frags++; credits += 200; addXp(XP.frag); hull = HULL_MAX; fuel = fuelMax();
   [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
   const c = $('card');
   const html = H.fragPop(T.fragment.title(frags, FRAG_N), T.fragment.reward, FRAG_TEXT[k]);
@@ -654,7 +763,7 @@ function collectFragment(keep = false) {
   setQuestTarget(); doSave();
 }
 function showEnding() {
-  bhDone = true; credits += 5000;
+  bhDone = true; credits += 5000; addXp(XP.bh); knowSeen.add('blackhole'); unlock('blackhole', true);   // 扫描奇点之后才解锁黑洞的介绍
   const m = Math.floor(playTime / 60), s = Math.floor(playTime % 60);
   $('endStats').innerHTML = T.ending.stats(m, s, visited.size, systems.length, discovered.size, beaconsGot.size);
   [392, 523, 659, 784, 1047].forEach((f, i) => beep(f, .5, 'triangle', .06, i * .18));
@@ -705,7 +814,7 @@ function claimBeacon(b) {
   else if (b.type === 'distress') { cr = b.reward.credits * m; const f = Math.round(30 * m); fuel = Math.min(fuelMax(), fuel + f); parts.push(T.sig.fuelPlus(f)) }
   else if (b.type === 'ruins') { cr = b.reward.credits * 1.5 * m; const n = giveItem(b.loot.res, b.power); parts.push(n ? T.sig.item(b.loot.res, n) : T.sig.relicLost) }
   else { good = false; if (rank() < 1) parts.push(T.sig.trainingShield); else { const f = 8 * b.power, h = 6 * b.power; fuel = Math.max(0, fuel - f); hull = Math.max(0, hull - h); parts.push(T.sig.decoyHit(f, h)) } }
-  cr = Math.round(cr); credits += cr; beaconsGot.add(b.id); addXp(5);
+  cr = Math.round(cr); credits += cr; beaconsGot.add(b.id); addXp(XP.beacon);
   toast(T.sig.got(SIG[b.type].name, '▮'.repeat(b.power), cr, parts), good ? 'good' : 'warn');
   if (good) { beep(990, .15, 'square', .04); beep(1320, .2, 'square', .04, .12) } else beep(140, .3, 'sawtooth', .06);
 }
@@ -793,7 +902,11 @@ $('tutChk').onchange = e => { if (e.target.checked) tutRestart(); else { tutOff 
 $('tutReset').onclick = () => { tutRestart(); knowSeen.clear(); try { localStorage.removeItem('deepspace-know') } catch { } closePanel(); toast(T.toast.tutRestart, 'good') };
 $('tutOff').onclick = () => { tutOff = true; tutSave(); closePanel(); $('tutor').classList.add('hidden') };
 // ===== 危险事件 =====
-let flare = null, flareCd = 20, beltAcc = 0, inBelt = false;
+let scanBreakFlare = null;
+let flare = null, flareCd = 20, beltAcc = 0, inBelt = false, meltDepth = 0, meltWarnCd = 0;
+// 恒星距离分区（R = 恒星半径）：碰撞圈 1.5R+2 → 熔毁区（持续高温伤害，越近越重）→ 耀斑区 5R。碰撞圈外约 2.6R 以内是熔毁区
+const starZones = R => { const inner = R * 1.5 + 2; return { inner, melt: Math.max(R * 2.6, inner + 8), flare: R * 5 } };
+const flareDepth = (d, R) => { const z = starZones(R); return Math.max(0, Math.min(1, 1 - (d - z.melt) / (z.flare - z.melt))) };   // 耀斑强度系数：熔毁区边缘 1 → 5R 边缘 0
 const danger = () => 1 + .12 * frags;
 function hurt(d, why) {
   if (d < 1) return;
@@ -832,6 +945,7 @@ function hullWarn() {
 }
 function redFx() {
   const t = performance.now() / 1000; let a = 0;
+  if (meltDepth > 0) a = Math.max(a, .3 + .5 * meltDepth + .1 * Math.sin(t * 12));   // 熔毁区：越近越红
   if (flare) a = Math.max(a, .35 + .35 * Math.sin(t * 9));                         // 耀斑预警：快速脉冲
   if (hull < HULL_MAX * .3) a = Math.max(a, .25 + .15 * Math.sin(t * 5));          // 船体危急：常亮 + 心跳
   if (tideDepth > 0) a = Math.max(a, tideDepth * (.5 + .4 * Math.sin(t * (4 + 6 * tideDepth))));   // 潮汐：越近越亮越快
@@ -846,13 +960,13 @@ function welcomeTick() {   // 第一个移动教学完成（或教学已关闭�
 function promoTick() {   // 每帧检查：经验够了就弹出晋升（等收藏、卡片、其他面板都关了之后）
   if (!running || rankTarget() <= rankSeen || openP || cardHold || collectPending || !$('card').classList.contains('hidden')) return;
   rankSeen++;
-  const r = rankSeen, box = $('know').firstElementChild; box.classList.add('rich');
-  box.innerHTML = H.promoHtml({ rank: r, rankName: RANKS[r].name, nextName: RANKS[r + 1]?.name, xp, need: RANK_NEED[r] || 0, lo: RANK_NEED[r - 1], sysXp: SYS_XP[r] });
+  const r = rankSeen, box = $('know').firstElementChild; box.classList.remove('lib'); box.classList.add('rich');
+  box.innerHTML = H.promoHtml({ rank: r, rankName: RANKS[r].name, nextName: RANKS[r + 1]?.name, xp, need: RANK_NEED[r] || 0, lo: RANK_NEED[r - 1], sysXp: 0 });
   box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
   openPanel('know'); [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
   setQuestTarget(); loaded.forEach(addStoryBeacon); doSave();
 }
-const DROP_XP = [0, 200, 400, 750, 1500];   // 降到某军衔后的经验（下标 = 降级后的军衔：初/中/高/资深）
+const DROP_XP = [0, 325, 800, 1550, 2700];   // 降到某军衔后的经验（下标 = 降级后的军衔：初/中/高/资深）
 function demote() {   // 被强制送回家园：降一级（最低初级），经验降到新军衔区间的中间值
   const r = rank(), nr = Math.max(1, r - 1);
   xp = Math.min(xp, DROP_XP[nr]); rankSeen = nr;
@@ -860,18 +974,29 @@ function demote() {   // 被强制送回家园：降一级（最低初级），�
   setQuestTarget();
 }
 function hazards(dt) {
-  if (rank() < 1) { tideDepth = 0; flare = null; inBelt = false; return }   // 实习生：没有危险
-  if (warp) { tideDepth = 0; return }
+  if (rank() < 1) { tideDepth = 0; flare = null; inBelt = false; meltDepth = 0; return }   // 实习生：没有危险
+  if (warp) { tideDepth = 0; meltDepth = 0; return }
   if (hull <= 0) { wreck(); return }
   tide(dt);
   let near = null;
-  for (const L of loaded) for (const s of L.stars) { tV.copy(s.mesh.position).add(L.sys.pos); if (ship.pos.distanceTo(tV) < s.st.radius * 5) near = { pos: tV.clone(), r: s.st.radius * 5 } }
+  for (const L of loaded) for (const s of L.stars) { tV.copy(s.mesh.position).add(L.sys.pos); const d = ship.pos.distanceTo(tV), R = s.st.radius; if (d < R * 5 && (!near || d < near.d)) near = { pos: tV.clone(), R, d, mul: L.sys.flare ?? 1 } }
+  // 熔毁区：持续高温伤害（5～15 点/秒，越近越重），不再是「贴着恒星也没事」
+  meltDepth = 0;
+  if (near) { const z = starZones(near.R); if (near.d < z.melt) meltDepth = Math.max(0, Math.min(1, 1 - (near.d - z.inner) / (z.melt - z.inner))) }
+  if (meltDepth > 0) {
+    hull = Math.max(0, hull - (5 + 10 * meltDepth) * danger() * dt);
+    meltWarnCd -= dt; if (meltWarnCd <= 0) { meltWarnCd = 3; toast(T.toast.meltWarn, 'warn'); beep(160, .25, 'sawtooth', .06) }
+  } else meltWarnCd = 0;
   if (flare) {
     flare.t -= dt;
-    if (flare.t <= 0) { if (ship.pos.distanceTo(flare.pos) < flare.r) { hurt(12 * danger(), T.toast.hurtFlare); energy = 0; fuel = Math.max(0, fuel - 5) } else toast(T.toast.flareAvoided, 'good'); flare = null; flareCd = 25 }
+    if (flare.t <= 0) {
+      const d = ship.pos.distanceTo(flare.pos);
+      if (d < flare.R * 5) { const k = flareDepth(d, flare.R); hurt((6 + 18 * k) * danger(), T.toast.hurtFlare); energy = 0; fuel = Math.max(0, fuel - 5) } else toast(T.toast.flareAvoided, 'good');   // 耀斑伤害随距离：5R 边缘约 6 点，熔毁区边缘约 24 点
+      flare = null; flareCd = 25; know('flare', 1500)
+    }
   } else {
     flareCd -= dt;
-    if (near && flareCd <= 0 && Math.random() < .08 * danger() * dt) { flare = { t: 4, pos: near.pos, r: near.r }; toast(T.toast.flareWarn, 'warn'); beep(220, .3, 'square', .05) }
+    if (near && flareCd <= 0 && Math.random() < .08 * (.5 + flareDepth(near.d, near.R)) * near.mul * danger() * dt) { flare = { t: 4, pos: near.pos, R: near.R }; toast(T.toast.flareWarn, 'warn'); beep(220, .3, 'square', .05) }   // 耀斑概率也随距离：边缘 0.5 倍 → 近处 1.5 倍
   }
   let now = false;
   for (const L of loaded) {
@@ -879,10 +1004,42 @@ function hazards(dt) {
     const { a, b } = L.belt.userData, rx = ship.pos.x - L.sys.pos.x, rz = ship.pos.z - L.sys.pos.z, ry = ship.pos.y - L.sys.pos.y, r = Math.hypot(rx, rz), v = ship.vel.length();
     if (r > a - 1 && r < b + 1 && Math.abs(ry) < 4) { now = true; if (v > 12) { beltAcc += (v - 12) * .05 * danger() * dt; if (beltAcc >= 3) { hurt(beltAcc, T.toast.hurtBelt); beltAcc = 0 } } }
   }
-  if (now && !inBelt) toast(T.toast.beltEnter, 'warn');
+  if (now && !inBelt) { toast(T.toast.beltEnter, 'warn'); know('belt', 1500) }
   inBelt = now;
 }
+// ---- 恒星扫描 ----
+const STAR_CLASS = ['G', 'F', 'K', 'A', 'M'], STAR_KEY = { G: 'star_G', F: 'star_F', K: 'star_K', A: 'star_blue', M: 'cat_redDwarf', RG: 'cat_redGiant' };
+const STAR_TEMP = { G: 5700, F: 6600, K: 4600, A: 8500, M: 3200, RG: 4000 };   // 游戏里生成的恒星：各类型的典型温度（设定值）
+const starClassOf = s => s.rid ? byId(s.rid).star.type[0] : s.cat === 'redGiant' ? 'RG' : STAR_CLASS[Math.max(0, STAR_COLS.indexOf(s.color))];
+function showStarCard(sys, gain) {
+  const cls = starClassOf(sys), d = sys.rid ? byId(sys.rid) : null;
+  const U = T.star, tg = (k, t) => `<span class="c-tag-${k}">${t}</span>`, R = genStars(sys)[0].radius, z = starZones(R);
+  const typeTxt = d ? d.star.type + ' 型恒星' : cls === 'RG' ? T.sys.redGiant : T.sys.starTypes[STAR_CLASS.indexOf(cls)];
+  const rows = [`${U.type}：${typeTxt} ${tg(d ? 'm' : 'g', d ? U.measured : U.generated)}`,
+    `${U.temp}：约 ${(d ? d.star.teff : STAR_TEMP[cls]).toLocaleString('en')} K ${tg(d ? 'm' : 'g', d ? U.measured : U.generated)}`];
+  if (d) rows.push(`${U.radius}：${d.star.r} 倍太阳 ${tg('m', U.measured)}`, `${U.mass}：${d.star.m} 倍太阳 ${tg('m', U.measured)}`, `${U.dist}：${d.ly} 光年 ${tg('m', U.measured)}`);
+  const f = sys.flare ?? 1, K = {
+    title: U.title(sys.name), fig: STAR_KEY[cls], tag: d ? U.tagReal : U.tagGen, chips: [typeTxt.split(' ')[0], `约 ${(d ? d.star.teff : STAR_TEMP[cls]).toLocaleString('en')} K`],
+    sec: [['📊', U.data, rows.join('<br>')],
+      ['⚡', U.flareHead, U.flare(f, Math.round(z.melt), Math.round(z.flare))],
+      ['🏅', U.reward, gain ? U.gain(gain) : U.again]]
+  };
+  const box = $('know').firstElementChild; box.classList.remove('lib'); box.classList.add('rich');
+  box.innerHTML = H.knowRich(K, false); box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
+  openPanel('know');
+}
+function completeStar(c) {
+  const sys = c.star, first = !starsDone.has(sys.i), cls = starClassOf(sys);
+  let gain = 0;
+  if (first) {
+    const newCls = ![...starsDone].some(i => starClassOf(systems[i]) === cls);
+    starsDone.add(sys.i); gain = 20 + (newCls ? 30 : 0); addXp(gain); unlock(STAR_KEY[cls], true); doSave();
+    [660, 880, 1100].forEach((f, i) => beep(f, .18, 'triangle', .06, i * .09));
+  } else beep(500, .1);
+  showStarCard(sys, gain);
+}
 function completeScan(c) {
+  if (c.star) { completeStar(c); return }
   if (c.id === 'bh') {
     if (bhDone) { toast(T.toast.bhRecorded); return }
     if (frags < FRAG_N) { toast(T.toast.bhEcho(frags, FRAG_N), 'warn'); beep(120, .5, 'sine', .06); return }
@@ -892,17 +1049,18 @@ function completeScan(c) {
   did.scan = true;
   const p = c.p, isNew = !discovered.has(p.id);
   if (isNew) {
-    addXp(10);
+    addXp(PLANET_XP(p));
+    if (p.ring || p.moons >= 3) know('ringMoon', 1500);
     discovered.add(p.id); credits += p.info.value; fuel = Math.min(fuelMax(), fuel + p.info.fuelGain);
-        toast(T.toast.discovered(p.name, p.info.value), 'good');
+        toast(T.toast.discovered(p.name, p.info.value, PLANET_XP(p)), 'good');
     [660, 880, 1100].forEach((f, i) => beep(f, .18, 'triangle', .06, i * .09)); doSave();
     const sys = systems[+p.id.split(':')[0]];
-    if (genPlanets(sys).every(q => discovered.has(q.id))) {
-      const gain = SYS_XP[rank()];
+    if (genPlanets(sys).every(q => q.home || discovered.has(q.id))) {
+      const gain = sysGain(sys);
       if (!doneSys.has(sys.i)) { doneSys.add(sys.i); addXp(gain) }
       toast(T.toast.sysComplete(sys.name, gain), 'good');
       collectPending = true;   // 晋升弹窗要等收藏关闭之后
-      setTimeout(() => { collectPending = false; if (openP !== 'cards') { pendingFilter = String(sys.i); openPanel('cards') } }, 3500);
+      setTimeout(() => { collectPending = false; if (openP !== 'cards') { cardTab = 'planets'; pendingFilter = String(sys.i); openPanel('cards') } }, 3500);
     }
   } else beep(500, .1);
   takeSample(p);
@@ -1032,20 +1190,27 @@ function update(dt) {
   // ---- 扫描目标 ----
   tV3.set(0, 0, -1).applyQuaternion(ship.quat);
   let cand = null, cd = 1e9;
-  const test = (id, pos, effR, range, obj) => {
-    tV.copy(pos).sub(ship.pos); const d = tV.length(); if (d > range || d < .1) return;
+  const test = (id, pos, effR, range, obj, min = .1) => {
+    tV.copy(pos).sub(ship.pos); const d = tV.length(); if (d > range || d < min) return;
     const ang = Math.acos(Math.min(1, tV.dot(tV3) / d)), angR = Math.asin(Math.min(1, effR / d));
     if (ang < Math.max(angR, .035) && d < cd) { cd = d; cand = { id, d, ...obj } }
   };
   if (!warp) {
-    for (const L of loaded) for (const pl of L.planets) { if (!pl.show) continue; pl.mesh.getWorldPosition(tV2); test(pl.p.id, tV2, pl.p.radius * 1.2 + .5, scanRange(), { p: pl.p, name: pl.p.name }) }
+    for (const L of loaded) for (const pl of L.planets) { if (!pl.show || pl.p.home) continue; pl.mesh.getWorldPosition(tV2); test(pl.p.id, tV2, pl.p.radius * 1.2 + .5, scanRange(), { p: pl.p, name: pl.p.name }) }
+    for (const L of loaded) {   // 主恒星：要在安全距离外（3R）、也不能太远（7R）才能扫描
+      const s = L.stars[0]; if (!s) continue; const R = s.st.radius;
+      tV2.copy(s.mesh.position).add(L.sys.pos); test('star:' + L.sys.i, tV2, R * 1.05, R * 7, { star: L.sys, R, name: starsDone.has(L.sys.i) ? L.sys.name : T.hud.unknownStar }, R * 3);
+    }
     test('bh', bh.position, BH_T.effR, BH_T.range, { name: BH_T.name });
   }
   scanCand = cand;
   const holding = (mouseHeld || k.KeyF) && cand && !paused();
   if (holding) {
     if (scanId !== cand.id) { scanId = cand.id; scanT = 0 }
-    scanT += dt / scanTime();
+    if (cand.star && flare) {   // 耀斑预警期间扫描恒星会被打断
+      if (scanT > 0 && flare !== scanBreakFlare) { scanBreakFlare = flare; toast(T.hud.scanBreak, 'warn') }
+      scanT = 0;
+    } else scanT += dt / (scanTime() * (cand.star ? .7 + .6 * Math.max(0, Math.min(1, (cand.d - cand.R * 3) / (cand.R * 4))) : 1));   // 恒星：越近扫得越快（0.7～1.3 倍时间）
     if (scanT >= 1) { completeScan(cand); scanT = 0; mouseHeld = false; keys.KeyF = false }
   } else { scanT = Math.max(0, scanT - dt * 2); if (!cand) scanId = null }
 
@@ -1096,8 +1261,8 @@ function updateHUD() {
   let pr = '';
   if (warp) pr = T.hud.promptWarp(warp.target.name);
   else if (scanCand) {
-    const known = scanCand.p ? discovered.has(scanCand.p.id) : bhDone;
-    pr = T.hud.promptScan(scanCand.name, Math.round(scanCand.d), known);
+    const known = scanCand.p ? discovered.has(scanCand.p.id) : scanCand.star ? starsDone.has(scanCand.star.i) : bhDone;
+    pr = T.hud.promptScan(scanCand.p && !known ? T.hud.unknownBody : scanCand.name, Math.round(scanCand.d), known);   // 还没扫描过的行星不显示名字
   } else if (scooping) pr = T.ui.scooping;
   else if (document.pointerLockElement !== renderer.domElement && !openP) pr = T.ui.pointerLock;
   $('prompt').innerHTML = H.kbd(pr);
@@ -1105,7 +1270,7 @@ function updateHUD() {
   // 行星标签
   for (const L of loaded) {
     for (const pl of L.planets) {
-      pl.mesh.getWorldPosition(tV); const d = tV.distanceTo(ship.pos), s = toScreen(tV), known = discovered.has(pl.p.id);
+      pl.mesh.getWorldPosition(tV); const d = tV.distanceTo(ship.pos), s = toScreen(tV), known = pl.p.home || discovered.has(pl.p.id);
       if (s.behind || d > 450 || warp || !pl.show) { pl.label.style.display = 'none'; continue }
       const sig = qOn() && fragKind(frags) === 'planet' && pl.p.id === fragSys[frags] + ':' + fragPlanetIdx(frags);
       pl.label.style.display = 'block'; pl.label.className = (known ? 'ok ' : '') + (sig ? 'st' : '');
@@ -1160,7 +1325,8 @@ function renderJournal() {
   const planets = ids.map(id => { const [si, pi] = id.split(':').map(Number); return genPlanets(systems[si])[pi] });
   $('jbody').innerHTML = H.journalHtml({
     locked: rank() < 1, frags, total: FRAG_N, bhDone, fragTexts: FRAG_TEXT.slice(0, frags),
-    planets, visited: visited.size, systems: systems.length, beacons: beaconsGot.size, value: planets.reduce((a, p) => a + p.info.value, 0)
+    planets, reals: systems.filter(s => s.rid).map(s => ({ name: s.name, visited: visited.has(s.i), ly: s.ly, spec: byId(s.rid).star.type, cat: T.sys.cats[s.cat], found: genPlanets(s).filter(p => discovered.has(p.id)).length, total: s.nPlanets })),
+    visited: visited.size, systems: systems.length, beacons: beaconsGot.size, value: planets.reduce((a, p) => a + p.info.value, 0)
   });
 }
 function renderCargo() {

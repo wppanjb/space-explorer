@@ -9,6 +9,7 @@ const SKY = {   // [天顶颜色, 地平线颜色]
   '浓厚': [[.25, .12, .08], [.9, .58, .32]], '有毒': [[.12, .2, .05], [.75, .78, .28]],
   '宜居': [[.08, .25, .6], [.7, .85, .97]]
 };
+const TAG_COL = { 实测: '#7fe0a0', 推测: '#ffd27a', 生成: '#8fa3c4' };   // 数据来源标签的颜色
 const KIND = { rock: '岩石行星', gas: '气态巨行星', ice: '冰巨星' };
 const LIFE_COL = { '微生物': [.5, 1, .7], '植物': [.4, .95, .4], '动物': [1, .75, .4], '文明遗迹': [.6, .9, 1], '漂浮微生物': [.5, 1, .8] };
 
@@ -55,6 +56,60 @@ function ruin(g, x, y, s, col) {
   g.beginPath(); g.arc(x, y - s * 1.3, s * .5, Math.PI, 0); g.stroke();
   glow(g, x, y - s * .6, s * .8, col, .35);
   g.beginPath(); g.moveTo(x - s * .12, y - s * .5); g.lineTo(x + s * .12, y - s * .5); g.moveTo(x, y - s * .9); g.lineTo(x, y - s * .3); g.stroke();
+}
+// ---------- 地球专用：植物、动物和人类 ----------
+function tree(g, x, y, h, rnd) {   // 树：棕色树干 + 几团绿色树冠
+  g.fillStyle = '#5b3f2a'; g.fillRect(x - h * .035, y - h * .5, h * .07, h * .5);
+  for (let k = 0; k < 4; k++) {
+    const cx = x + (rnd() - .5) * h * .3, cy = y - h * (.55 + rnd() * .3), r = h * (.2 + rnd() * .1);
+    g.fillStyle = css(mix([.16, .42, .17], [.4, .6, .22], rnd() * .7)); g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill();
+  }
+}
+function grass(g, x, y, h, rnd) {   // 一丛草和小花
+  g.strokeStyle = '#3d7a2e'; g.lineWidth = 1.6;
+  for (let k = -2; k <= 2; k++) { g.beginPath(); g.moveTo(x + k * 3, y); g.quadraticCurveTo(x + k * 5, y - h * .6, x + k * 8 + (rnd() - .5) * 6, y - h); g.stroke() }
+  if (rnd() < .6) { g.fillStyle = ['#ffd84a', '#ff8fb0', '#ffffff'][rnd() * 3 | 0]; g.beginPath(); g.arc(x + 4, y - h * .9, 2.6, 0, 7); g.fill() }
+}
+function cat(g, x, y, s) {   // 坐着的橘猫：身体、头、尖耳朵、弯尾巴、眼睛、胡须、条纹
+  const fur = '#e08a3c', dark = '#b8631f';
+  g.lineCap = 'round';
+  g.strokeStyle = fur; g.lineWidth = s * .16;                                   // 尾巴：绕到身体前方再翘起
+  g.beginPath(); g.moveTo(x + s * .35, y - s * .12); g.bezierCurveTo(x + s * .95, y - s * .05, x + s * .85, y - s * .7, x + s * .6, y - s * .75); g.stroke();
+  g.fillStyle = fur; g.beginPath(); g.ellipse(x, y - s * .4, s * .42, s * .42, 0, 0, 7); g.fill();   // 身体
+  g.beginPath(); g.ellipse(x - s * .12, y - s * .06, s * .3, s * .12, 0, 0, 7); g.fill();            // 前爪
+  g.fillStyle = '#f6d9b0'; g.beginPath(); g.ellipse(x - s * .08, y - s * .3, s * .17, s * .26, 0, 0, 7); g.fill();   // 白肚皮
+  g.fillStyle = fur; g.beginPath(); g.arc(x - s * .08, y - s * .92, s * .3, 0, 7); g.fill();         // 头
+  g.beginPath(); g.moveTo(x - s * .34, y - s * 1.02); g.lineTo(x - s * .32, y - s * 1.36); g.lineTo(x - s * .1, y - s * 1.16); g.fill();   // 左耳
+  g.beginPath(); g.moveTo(x + s * .18, y - s * 1.16); g.lineTo(x + s * .22, y - s * 1.36); g.lineTo(x + s * .26, y - s * 1.0); g.fill();   // 右耳
+  g.strokeStyle = dark; g.lineWidth = s * .05;                                  // 条纹
+  for (const k of [-.12, 0, .12]) { g.beginPath(); g.moveTo(x - s * .08 + s * k, y - s * 1.2); g.lineTo(x - s * .08 + s * k, y - s * 1.1); g.stroke() }
+  for (const k of [.18, .36]) { g.beginPath(); g.moveTo(x + s * .3, y - s * (.2 + k)); g.lineTo(x + s * .42, y - s * (.24 + k)); g.stroke() }
+  g.fillStyle = '#2a4a1e';                                                      // 眼睛、鼻子
+  g.beginPath(); g.ellipse(x - s * .2, y - s * .94, s * .045, s * .06, 0, 0, 7); g.ellipse(x + s * .04, y - s * .94, s * .045, s * .06, 0, 0, 7); g.fill();
+  g.fillStyle = '#e86a7a'; g.beginPath(); g.arc(x - s * .08, y - s * .85, s * .03, 0, 7); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 1;                     // 胡须
+  for (const d of [-1, 1]) for (const k of [-.03, .04]) { g.beginPath(); g.moveTo(x - s * .08 + d * s * .1, y - s * (.86 + k)); g.lineTo(x - s * .08 + d * s * .38, y - s * (.88 + k * 3)); g.stroke() }
+}
+function bird(g, x, y, s) {   // 飞鸟：两道弧线
+  g.strokeStyle = 'rgba(30,40,60,.8)'; g.lineWidth = 1.8; g.beginPath();
+  g.moveTo(x - s, y); g.quadraticCurveTo(x - s * .5, y - s * .6, x, y); g.quadraticCurveTo(x + s * .5, y - s * .6, x + s, y); g.stroke();
+}
+function person(g, x, y, s, shirt) {   // 站立的人：头、身体、手臂、两条腿
+  g.lineCap = 'round'; g.strokeStyle = '#2b3350'; g.lineWidth = s * .09;
+  g.beginPath(); g.moveTo(x - s * .12, y - s * .5); g.lineTo(x - s * .14, y); g.moveTo(x + s * .12, y - s * .5); g.lineTo(x + s * .14, y); g.stroke();
+  g.fillStyle = shirt; g.beginPath(); g.roundRect(x - s * .22, y - s * 1.05, s * .44, s * .58, s * .1); g.fill();
+  g.strokeStyle = '#e8b890'; g.lineWidth = s * .08; g.beginPath(); g.moveTo(x - s * .22, y - s * .98); g.lineTo(x - s * .3, y - s * .6); g.moveTo(x + s * .22, y - s * .98); g.lineTo(x + s * .3, y - s * .6); g.stroke();
+  g.fillStyle = '#e8b890'; g.beginPath(); g.arc(x, y - s * 1.22, s * .17, 0, 7); g.fill();
+  g.fillStyle = '#3a2a22'; g.beginPath(); g.arc(x, y - s * 1.27, s * .17, Math.PI, 0); g.fill();
+}
+function earthScene(g, W, SH, rnd) {
+  const gy = SH * .9;
+  for (let k = 0; k < 7; k++) tree(g, 20 + rnd() * (W - 40), SH * (.8 + rnd() * .06), 70 + rnd() * 60, rnd);        // 远处的树
+  for (let k = 0; k < 4; k++) bird(g, W * (.2 + rnd() * .65), SH * (.12 + rnd() * .3), 6 + rnd() * 5);
+  cat(g, W * .2, gy + 8, 38);                                                                                  // 动物
+  for (let k = 0; k < 16; k++) grass(g, 10 + rnd() * (W - 20), gy + rnd() * (SH * .1), 12 + rnd() * 16, rnd);   // 植物
+  tree(g, W * .88, gy + 4, 120, rnd);
+  person(g, W * .55, gy + 14, 46, '#d65a4a'); person(g, W * .63, gy + 16, 40, '#3f7fd1'); person(g, W * .59, gy + 22, 26, '#e8c23c');   // 人类：两个大人和一个孩子
 }
 function lifeScene(g, p, W, SH, rnd, col) {
   const life = p.info.life, gy = SH * .9;
@@ -120,8 +175,10 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
   if (typeof stars[0] === 'number') stars = [{ color: stars, radius: 7 }];
   const starColor = stars[0].color, nStars = stars.length;
   const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
-  const rnd = mulberry32(p.seed * 7 + 13), i = p.info, SH = 400, rar = rarity(p);
-  const lifeCol = LIFE_COL[i.life] || null;
+  const rnd = mulberry32(p.seed * 7 + 13), i = p.info, SH = 400;
+  // 出发点（地球）：不是样本，没有稀有度；也不画外星生物，只画蓝天、白云和绿色的大地
+  const rar = p.home ? { name: '出发点', n: 0, col: '#7fd4ff' } : rarity(p);
+  const lifeCol = p.home ? null : (LIFE_COL[i.life] || null);
   g.save(); g.beginPath(); g.roundRect(0, 0, W, H, 18); g.clip();
   g.fillStyle = '#05080f'; g.fillRect(0, 0, W, H);
 
@@ -137,7 +194,7 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
         g.beginPath(); g.ellipse(0, HY * 1.1, W * (.95 + w * .05), HY * 1.0, 0, Math.PI * 1.08, Math.PI * 1.92); g.stroke() }
       g.restore();
     }
-    for (let m = 0; m < p.moons; m++) { const mx = rnd() * W, my = SH * (.08 + rnd() * .25), mr = 9 + rnd() * 14; g.fillStyle = '#b8b8c0'; g.beginPath(); g.arc(mx, my, mr, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,10,.45)'; g.beginPath(); g.arc(mx + mr * .35, my, mr * .95, 0, 7); g.fill() }
+    for (let m = 0; m < p.moons; m++) { const mx = rnd() * W, my = SH * (.08 + rnd() * .25), mr = m < 4 ? 9 + rnd() * 14 : 2.5 + rnd() * 3.5; g.fillStyle = '#b8b8c0'; g.beginPath(); g.arc(mx, my, mr, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,10,.45)'; g.beginPath(); g.arc(mx + mr * .35, my, mr * .95, 0, 7); g.fill() }
     g.fillStyle = css(hor, .35); g.fillRect(0, HY - 3, W, 6);   // 地平线上的一线微光
     let nearCol = hor;
     for (let L = 0; L < 9; L++) {   // 云海：由远到近，云层越来越大、越来越暗
@@ -155,15 +212,17 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
     const gr = g.createLinearGradient(0, 0, 0, SH); gr.addColorStop(0, css(sky[0])); gr.addColorStop(1, css(sky[1])); g.fillStyle = gr; g.fillRect(0, 0, W, SH);
     if (showStars) for (let k = 0; k < 160; k++) { g.fillStyle = `rgba(255,255,255,${.2 + rnd() * .7})`; g.fillRect(rnd() * W, rnd() * SH * .75, 1 + rnd() * 1.2, 1 + rnd() * 1.2) }
     drawSuns(g, stars, rnd, W, SH, p.dist);
-    for (let m = 0; m < p.moons; m++) { const mx = rnd() * W, my = SH * (.1 + rnd() * .3), mr = 10 + rnd() * 16; g.fillStyle = '#b8b8c0'; g.beginPath(); g.arc(mx, my, mr, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,10,.45)'; g.beginPath(); g.arc(mx + mr * .35, my, mr * .95, 0, 7); g.fill() }
+    if (p.home) for (let k = 0; k < 16; k++) puff(g, rnd() * W, SH * (.12 + rnd() * .38), 40 + rnd() * 70, 9 + rnd() * 14, [1, 1, 1], .5);   // 白云
+    for (let m = 0; m < p.moons; m++) { const mx = rnd() * W, my = SH * (.1 + rnd() * .3), mr = m < 4 ? 10 + rnd() * 16 : 2.5 + rnd() * 3.5; g.fillStyle = '#b8b8c0'; g.beginPath(); g.arc(mx, my, mr, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,10,.45)'; g.beginPath(); g.arc(mx + mr * .35, my, mr * .95, 0, 7); g.fill() }
     let ground = p.kind === 'ice' ? mix(p.palette[0], [.9, .95, 1], .55) : p.palette[0];
     if (i.life === '植物' || (i.atm === '宜居' && i.life !== '无')) ground = mix(ground, [.2, .5, .2], .35);
+    if (p.home) ground = [.3, .5, .28];   // 地球的大地是绿色的（贴图的蓝色是海洋）
     const layers = [[.62, 95, .65], [.74, 65, .4], [.86, 40, .15]];
     for (const [b, a, fog] of layers) ridge(g, W, SH, SH * b, a, rnd, css(mix(mix(ground, [0, 0, 0], .2 + (.65 - fog) * .4), sky[1], fog)));
     const fg = g.createLinearGradient(0, SH * .88, 0, SH); fg.addColorStop(0, css(mix(ground, [0, 0, 0], .35))); fg.addColorStop(1, css(mix(ground, [0, 0, 0], .7))); g.fillStyle = fg; g.fillRect(0, SH * .88, W, SH * .12);
     for (let k = 0; k < 30; k++) { g.fillStyle = css(mix(ground, [0, 0, 0], .5 + rnd() * .3)); g.beginPath(); g.ellipse(rnd() * W, SH * (.9 + rnd() * .1), 4 + rnd() * 14, 2 + rnd() * 5, 0, 0, 7); g.fill() }
     for (let k = 1; k < Math.min(nStars, 2); k++) { g.fillStyle = css(stars[k].color, .07); g.fillRect(0, 0, W, SH) }   // 第二颗太阳的光在景物上叠一层淡淡的色调
-    if (lifeCol) lifeScene(g, p, W, SH, rnd, lifeCol);
+    if (p.home) earthScene(g, W, SH, rnd); else if (lifeCol) lifeScene(g, p, W, SH, rnd, lifeCol);
   }
   if (lifeCol) macro(g, p, W - 86, SH - 78, 62, rnd, lifeCol);
 
@@ -171,11 +230,81 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
   const ig = g.createLinearGradient(0, SH, 0, H); ig.addColorStop(0, '#0b1424'); ig.addColorStop(1, '#060b16'); g.fillStyle = ig; g.fillRect(0, SH, W, H - SH);
   g.fillStyle = rar.col; g.fillRect(0, SH, W, 3);
   g.fillStyle = '#e8f1ff'; g.font = 'bold 26px "Microsoft YaHei",sans-serif'; g.fillText(p.name, 24, SH + 40);
-  g.fillStyle = rar.col; g.font = '15px "Microsoft YaHei",sans-serif'; g.fillText(`${KIND[p.kind]} · ${rar.name} ${'★'.repeat(rar.n)}${nStars > 1 ? ' · ' + ['', '双星系统', '三星系统'][nStars - 1] : ''}`, 24, SH + 64);
+  const subFont = '15px "Microsoft YaHei",sans-serif', subTxt = `${KIND[p.kind]} · ${rar.name}${rar.n ? ' ' + '★'.repeat(rar.n) : ''}${nStars > 1 ? ' · ' + ['', '双星系统', '三星系统'][nStars - 1] : ''}`;
+  g.fillStyle = rar.col; g.font = subFont; g.fillText(subTxt, 24, SH + 64);
+  if (p.real && !p.home) { const w = g.measureText(subTxt).width; g.fillStyle = p.cand || p.padded ? '#ffd27a' : '#7fe0a0'; g.fillText(p.cand ? ' · 候选行星' : p.padded ? ' · 推测行星' : ' · 真实行星', 24 + w, SH + 64) }   // 真实行星标签单独上色（绿 = 真实，黄 = 候选 / 推测）
   g.fillStyle = '#b8c7e0'; g.font = '15px "Microsoft YaHei",monospace';
-  const rows = [[`温度 ${i.temp}°C`, `重力 ${i.g} g`], [`大气 ${i.atm}`, `资源 ${i.res}`], [`生命 ${i.life}`, `样本价值 ${i.value}`]];
-  rows.forEach((r, k) => { g.fillText(r[0], 24, SH + 100 + k * 28); g.fillText(r[1], W / 2 + 10, SH + 100 + k * 28) });
+  // 每行是 [[文字, 来源标签], [文字, 来源标签]]；来源标签只有真实行星才显示（实测 / 推测 / 生成）
+  const real = p.real && !p.home, tg = k => real ? (p.src[k] ?? p.src.env) : null, ex = p.au != null;   // ex：系外行星，多显示半径 / 质量 / 轨道
+  const rows = [
+    [[`温度 ${i.temp}°C`, tg('env')], [`重力 ${i.g} g`, tg('env')]],
+    [[`大气 ${i.atm}`, tg('atm')], [`资源 ${i.res}`, tg('res')]],
+    p.home ? [['生命 有'], [`已知卫星 ${p.knownMoons} 颗`]] : [[`生命 ${i.life}`, tg('life')], [`样本价值 ${i.value}`, tg('value')]],
+  ];
+  if (ex) {
+    rows.push([[`半径 ${p.earthR} R⊕`, p.src.size], [`质量 ${p.earthM} M⊕`, p.src.mass]]);
+    rows.push([[`轨道 ${+p.au.toPrecision(3)} AU`, p.src.orbit], [p.periodDays >= 1000 ? `周期 ${(p.periodDays / 365.25).toFixed(1)} 年` : `周期 ${+p.periodDays.toPrecision(3)} 天`, p.src.orbit]]);
+  } else if (real) rows.push([[p.knownMoons > 0 ? `已知卫星 ${p.knownMoons} 颗` : '无卫星', p.src.orbit]]);   // 太阳系：写真实的卫星数量
+  const y0 = SH + (rows.length > 4 ? 94 : 100), dy = rows.length > 4 ? 26 : 28;
+  const item = (it, x, y) => {
+    if (!it) return; g.fillStyle = '#b8c7e0'; g.font = '15px "Microsoft YaHei",monospace'; g.fillText(it[0], x, y);
+    if (it[1]) { const w = g.measureText(it[0]).width; g.fillStyle = TAG_COL[it[1]]; g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText(it[1], x + w + 6, y) }
+  };
+  rows.forEach((r, k) => { item(r[0], 24, y0 + k * dy); item(r[1], W / 2 + 10, y0 + k * dy) });
+  if (real) {   // 右下角图例
+    g.font = '11px "Microsoft YaHei",sans-serif'; let x = W - 24;
+    for (const t of ['生成', '推测', '实测']) { const w = g.measureText(t).width; x -= w; g.fillStyle = TAG_COL[t]; g.fillText(t, x, H - 18); x -= 10 }
+  }
   g.fillStyle = '#5c6b86'; g.font = '12px monospace'; g.fillText('DEEP SPACE EXPLORER', 24, H - 18);
   g.restore(); g.strokeStyle = rar.col; g.lineWidth = 3; g.beginPath(); g.roundRect(1.5, 1.5, W - 3, H - 3, 18); g.stroke();
   return c;
+}
+
+// ---------- 星系全景图（示意图）：俯视图，已扫描的行星画实心，没扫描的只画轨道和虚线圈 ----------
+// meta = { title, sub, starLabel, count, date, src, srcCol }；snapIds = 拍摄时已扫描的行星 id（出发点始终算已知）
+export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H = 450) {
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
+  g.fillStyle = '#04060f'; g.fillRect(0, 0, W, H);
+  const rnd = mulberry32(sys.seed ^ 0x5eed);
+  for (let i = 0; i < 140; i++) { g.fillStyle = `rgba(255,255,255,${.15 + rnd() * .5})`; g.fillRect(rnd() * W, rnd() * H, rnd() < .1 ? 2 : 1, rnd() < .1 ? 2 : 1) }
+  const cx = W / 2, cy = H / 2 + 14, tilt = .4, ids = new Set(snapIds);
+  const maxD = Math.max(60, ...planets.map(p => p.dist)), rx = d => 64 + 290 * Math.sqrt(d / maxD);
+  const sc = stars[0].color, sr = Math.max(14, Math.min(46, 10 + stars[0].radius * 1.6));
+  // 小行星带
+  if (sys.belt) {
+    const [a, b] = sys.belt, r1 = rx(a), r2 = rx(b), br = mulberry32(sys.seed ^ 0xbe17);
+    for (let i = 0; i < 260; i++) { const t = br() * 6.283, r = r1 + (r2 - r1) * br(); g.fillStyle = `rgba(190,180,165,${.25 + br() * .4})`; g.fillRect(cx + Math.cos(t) * r, cy + Math.sin(t) * r * tilt, 1.6, 1.6) }
+  }
+  // 轨道
+  g.lineWidth = 1;
+  for (const p of planets) { const r = rx(p.dist); g.strokeStyle = ids.has(p.id) || p.home ? 'rgba(127,212,255,.32)' : 'rgba(127,212,255,.14)'; g.setLineDash(ids.has(p.id) || p.home ? [] : [3, 5]); g.beginPath(); g.ellipse(cx, cy, r, r * tilt, 0, 0, 6.283); g.stroke() }
+  g.setLineDash([]);
+  // 恒星（多星系统：伴星画在旁边）
+  const glow = g.createRadialGradient(cx, cy, sr * .3, cx, cy, sr * 3.2); glow.addColorStop(0, css(sc, .55)); glow.addColorStop(1, css(sc, 0));
+  g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, sr * 3.2, 0, 6.283); g.fill();
+  g.fillStyle = css(mix(sc, [1, 1, 1], .35)); g.beginPath(); g.arc(cx, cy, sr, 0, 6.283); g.fill();
+  stars.slice(1).forEach((s, i) => { const x = cx + (i ? -1 : 1) * (sr + 20 + i * 10), y = cy - sr * .6 - i * 6, r = Math.max(5, Math.min(16, 4 + s.radius * .9)); g.fillStyle = css(mix(s.color, [1, 1, 1], .3)); g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill() });
+  g.textAlign = 'center'; g.font = '12px "Microsoft YaHei",sans-serif'; g.fillStyle = '#c9d6ee'; g.fillText(meta.starLabel, cx, cy + sr + 18);
+  // 行星（靠下的画在前面）
+  const spots = planets.map(p => { const r = rx(p.dist); return { p, x: cx + Math.cos(p.phase) * r, y: cy + Math.sin(p.phase) * r * tilt } }).sort((a, b) => a.y - b.y);
+  for (const { p, x, y } of spots) {
+    const known = ids.has(p.id) || p.home, pr = Math.max(5, Math.min(17, 3.5 + p.radius * 2.1));
+    if (known) {
+      const gr = g.createRadialGradient(x - pr * .35, y - pr * .35, pr * .1, x, y, pr); gr.addColorStop(0, css(p.palette[1])); gr.addColorStop(1, css(p.palette[0]));
+      if (p.glow) { g.fillStyle = css(p.glow, .3); g.beginPath(); g.arc(x, y, pr * 1.9, 0, 6.283); g.fill() }
+      g.fillStyle = gr; g.beginPath(); g.arc(x, y, pr, 0, 6.283); g.fill();
+      if (p.ring) { g.strokeStyle = 'rgba(230,215,170,.8)'; g.lineWidth = 2; g.beginPath(); g.ellipse(x, y, pr * 1.8, pr * .5, -.25, 0, 6.283); g.stroke() }
+      g.fillStyle = '#dfe9ff'; g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText(p.name, x, y + pr + 13);
+    } else {
+      g.strokeStyle = 'rgba(160,190,230,.55)'; g.lineWidth = 1.2; g.setLineDash([2, 3]); g.beginPath(); g.arc(x, y, pr, 0, 6.283); g.stroke(); g.setLineDash([]);
+      g.fillStyle = 'rgba(160,190,230,.7)'; g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText('?', x, y + 4);
+    }
+  }
+  // 标题和页脚
+  g.textAlign = 'left'; g.fillStyle = '#e8f1ff'; g.font = 'bold 22px "Microsoft YaHei",sans-serif'; g.fillText(meta.title, 24, 38);
+  g.fillStyle = '#9fb4d6'; g.font = '13px "Microsoft YaHei",sans-serif'; g.fillText(meta.sub, 24, 60);
+  g.fillStyle = meta.srcCol; g.fillText(meta.src, 24, H - 18);
+  g.textAlign = 'right'; g.fillStyle = '#9fb4d6'; g.fillText(`${meta.count}  ·  ${meta.date}`, W - 24, H - 18);
+  g.textAlign = 'left'; g.strokeStyle = 'rgba(127,212,255,.3)'; g.lineWidth = 2; g.strokeRect(1, 1, W - 2, H - 2);
+  return cv;
 }
