@@ -60,19 +60,22 @@
 .c-real.c-guess { color: #ffd27a; border-color: rgba(255, 210, 122, .5) }
 
 /* ---------- 知识库面板（按 L；和知识弹窗共用 #know 浮层） ---------- */
-#know .box.lib { max-width: 900px; width: min(94vw, 900px); padding: 0; overflow: hidden }
-.c-lib { display: grid; grid-template-columns: 220px 1fr; height: min(76vh, 640px) }
-.c-lib-list { border-right: 1px solid rgba(127, 212, 255, .25); overflow: auto; padding: 10px 0 }
+#know .box.lib { max-width: 1040px; width: min(96vw, 1040px); max-height: 96vh; padding: 0; overflow: hidden }
+.c-lib { display: grid; grid-template-columns: 220px 1fr; height: min(calc(75vh - 52px), 900px) }
+/* 示意图别随面板变宽而变得很高：固定高度、居中，保持 360:150 的比例，这样正文才不用滚动 */
+#know .c-lib-detail > .kfig { width: auto; max-width: calc(100% - 32px); height: clamp(110px, 20vh, 190px); aspect-ratio: 360 / 150; margin: 14px auto 0; border: 1px solid rgba(127, 212, 255, .28); border-radius: 10px }
+#know .c-lib-detail .kbody { padding: 12px 28px 14px }
+.c-lib-list { border-right: 1px solid rgba(127, 212, 255, .25); overflow: auto; padding: 6px 0 }
 .c-lib-count { padding: 2px 16px 8px; font-size: 12px; color: var(--c2); letter-spacing: .08em }
-.c-lib-list h3 { margin: 10px 16px 4px; font-size: 11.5px; letter-spacing: .2em; font-weight: 400; opacity: .55 }
-.c-lib-it { display: flex; justify-content: space-between; align-items: center; padding: 5px 16px; cursor: pointer; font-size: 14px }
+.c-lib-list h3 { margin: 8px 16px 2px; font-size: 11.5px; letter-spacing: .2em; font-weight: 400; opacity: .55 }
+.c-lib-it { display: flex; justify-content: space-between; align-items: center; padding: 3px 16px; cursor: pointer; font-size: 14px }
 .c-lib-it:hover { background: rgba(127, 212, 255, .08) }
 .c-lib-it.on { background: rgba(127, 212, 255, .16); color: #fff }
 .c-lib-new { font-size: 10px; font-weight: 400; color: #05101f; background: #ffd27a; border-radius: 8px; padding: 0 6px }
 .c-lib-detail { overflow: auto }
 .c-lib-empty { padding: 24px }
 #know .c-lib-hint { margin: 0; padding: 6px 16px; border-top: 1px solid rgba(127, 212, 255, .2) }
-@media (max-width: 640px) { .c-lib { grid-template-columns: 1fr; height: 78vh } .c-lib-list { border-right: 0; border-bottom: 1px solid rgba(127, 212, 255, .25); max-height: 190px } }
+@media (max-width: 640px) { .c-lib { grid-template-columns: 1fr; height: 90vh } .c-lib-list { border-right: 0; border-bottom: 1px solid rgba(127, 212, 255, .25); max-height: 190px } }
 
 /* ---------- 真实星系：系统补充块（放在通用知识弹窗里）和资料说明 ---------- */
 #know .c-sysblock { margin: 12px 0; border: 1px dashed rgba(127, 212, 255, .6); border-radius: 8px; padding: 8px 12px; background: rgba(127, 212, 255, .05) }
@@ -85,4 +88,16 @@
 .c-ctabs button { background: rgba(127, 212, 255, .08); border: 1px solid rgba(127, 212, 255, .3); color: #9fb4d6; padding: 4px 12px; border-radius: 6px; cursor: pointer; font: inherit }
 .c-ctabs button.on { background: rgba(127, 212, 255, .22); color: #e8f1ff; border-color: rgba(127, 212, 255, .7) }
 .c-ctabs .c-shot { margin-left: auto }
+.c-ctabs .c-sort { background: rgba(8, 14, 32, .9); color: #fff; border: 1px solid rgba(127, 212, 255, .3); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px }
 #cgrid.pano { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) }
+
+/* ---------- 军衔晋升弹窗：gold主题（靠 :has(.c-promo) 识别，只影响晋升弹窗） ---------- */
+#know:has(.c-promo) { background: radial-gradient(ellipse at 50% 35%, rgba(90,64,12,.5), rgba(4, 3, 2, .88) 70%) }
+#know .box:has(.c-promo) { background: linear-gradient(180deg, rgba(92,68,16,.88), rgba(40,28,6,.94)); border: 3px double rgba(255,214,120,.65); box-shadow: 0 0 40px rgba(255,196,70,.3), inset 0 0 44px rgba(255,210,110,.08) }
+#know .box:has(.c-promo) .ktag { color: #ffe7a8 }
+#know .box:has(.c-promo) .ksec.tip { border-color: rgba(255,214,120,.65); background: rgba(255,214,120,.12) }
+#know .box:has(.c-promo) .c-promo-bar { background: rgba(255,214,120,.12) }
+#know .box:has(.c-promo) button { color: #fff; background: rgba(255,196,70,.26); border-color: rgba(255,214,120,.7) }
+#know .box:has(.c-promo) button:hover { background: rgba(255,206,90,.5); color: #fff }
+/* 晋升弹窗顶部徽章区：金色底 */
+#know .box:has(.c-promo) > .kfig { background: linear-gradient(180deg, rgba(255, 238, 180, .42), rgba(255, 214, 120, .16)); border-bottom: 1px solid rgba(255, 224, 140, .5) }

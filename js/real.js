@@ -43,6 +43,18 @@ export const SOL = {
   ],
 };
 
+// 实测的物理数据（NASA 行星资料表）：[半径 R⊕, 质量 M⊕, 公转周期（天）]，卡片上显示
+const PHYS = {
+  '水星': [0.383, 0.0553, 88.0],
+  '金星': [0.949, 0.815, 224.7],
+  '地球': [1, 1, 365.25],
+  '火星': [0.532, 0.107, 687.0],
+  '木星': [11.21, 317.8, 4332.6],
+  '土星': [9.45, 95.2, 10759],
+  '天王星': [4.01, 14.5, 30687],
+  '海王星': [3.88, 17.1, 60190],
+};
+
 /** 游戏里画几颗卫星：≤2 颗照实画；更多时取平方根，最多 12 颗（太多会挤成一团，大部分真实卫星也只有几公里大） */
 export const shownMoons = n => n <= 2 ? n : Math.min(12, Math.round(Math.sqrt(n)));
 
@@ -59,9 +71,10 @@ export function buildSolPlanets(sys) {
       period: Math.pow(dist, 1.5) * .06, phase: R.uni(0, 6.283), palette: d.palette,
       ring: d.ring, moons: shownMoons(d.knownMoons), knownMoons: d.knownMoons, tilt: d.tilt * DEG, seed: R.int(1, 1e6),
       ecc: d.ecc, inc: d.inc * DEG, node: R.uni(0, 6.283), dir: 1,
+      au: d.au, periodDays: PHYS[d.name][2], earthR: PHYS[d.name][0], earthM: PHYS[d.name][1],   // 卡片上显示的半径 / 质量 / 轨道 / 周期（实测）
       home: !!d.home,   // 出发点：不可扫描、始终已知
       real: true,
-      src: { orbit: SRC.measured, size: SRC.measured, env: SRC.measured, life: SRC.measured, res: SRC.generated, value: SRC.generated, art: SRC.generated },
+      src: { orbit: SRC.measured, size: SRC.measured, mass: SRC.measured, env: SRC.measured, life: SRC.measured, res: SRC.generated, value: SRC.generated, art: SRC.generated },
       info: { atm: d.atm, temp: d.temp, g: d.g, res: d.res, life: d.life, value, fuelGain: d.kind === 'gas' ? 25 : 10 }
     };
   });

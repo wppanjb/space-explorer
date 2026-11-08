@@ -50,13 +50,12 @@ let frags = Math.min(FRAG_N, save?.frags ?? 0), playTime = save?.playTime ?? 0;
 // ===== 军衔与经验 =====
 const RANK_QUESTS = [0, 1, 2, 4, 7, 7];   // 各军衔已解锁的主线数量
 const RANKS = T.rankNames.map((name, i) => ({ name, quests: RANK_QUESTS[i] }));
-const RANK_NEED = [150, 500, 1100, 2000, 3400];   // 升到下一级所需的【累计】经验
+const RANK_NEED = [150, 500, 1200, 2500, 4000];   // 升到下一级所需的【累计】经验
 const OLD_NEED = [100, 300, 500, 1000, 2000];     // 旧版（xpv 1）门槛，只用来迁移旧存档
 const PLANET_XP = p => p.cat ? 25 : p.kind === 'rock' ? 8 : 12;   // 首次扫描行星：特别类别最多，岩石最少
 const XP = { unlock: 15, beacon: 8, frag: 100, bh: 300, pano: 10 };
 const rankOf = x => RANK_NEED.filter(n => x >= n).length;
 const panos = save?.panos || {};   // 星系全景图：星系编号 → { t 拍摄时间, ids 拍摄时已扫描的行星, star 主恒星是否已扫描 }
-const starsDone = new Set(save?.stars || []);   // 已扫描过主恒星的星系
 const doneSys = new Set(save?.done ?? (save ? systems.filter(s => genPlanets(s).every(p => p.home || discovered.has(p.id))).map(s => s.i) : []));
 let xp = save?.xp ?? (save ? discovered.size * 10 + beaconsGot.size * 5 + frags * 50 + doneSys.size * 30 : 0);   // 旧存档按已有进度估算
 const rankTarget = () => doneSys.has(0) ? rankOf(xp) : 0;     // 经验够了的军衔（家园星系没扫完前一直是实习生）
@@ -83,7 +82,7 @@ function doSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
-      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, xp, xpv: 2, stars: [...starsDone], panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
+      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
 }
@@ -372,8 +371,9 @@ function updateLOD() {
   // 进入某星系的提示 / 记为已到访
   const inside = cur && cur.sys._d < ENTER_R ? cur.sys : null;
   curSysI = inside ? inside.i : -1;
+  const passing = !!(warp && inside && inside !== warp.target);   // 曲速途中路过别的星系：不弹提示 / 介绍，也不算「到访」（到了目标星系、或中途取消曲速后才算）
   if (!inside) lastEntered = -1;
-  else if (lastEntered !== inside.i) {
+  else if (!passing && lastEntered !== inside.i) {
     lastEntered = inside.i;
     const first = !visited.has(inside.i); visited.add(inside.i);
     const n = genPlanets(inside).filter(p => discovered.has(p.id)).length;
@@ -453,7 +453,7 @@ function knowOf(key) {
   const K = KNOW[key];
   if (!key.startsWith('sys_') || !K) return K;
   const d = byId(key.slice(4)), sys = systems.find(s => s.rid === d.id), U = T.know.sysUi, n = d.planets.length;
-  return { ...K, figHtml: H.orbitFig({ star: d.star, star2: d.star2, planets: figPlanets(d, sys ? genPlanets(sys) : null) }),
+  return { ...K, real: true, figHtml: H.orbitFig({ star: d.star, star2: d.star2, planets: figPlanets(d, sys ? genPlanets(sys) : null) }),
     chips: [U.chipLy(d.ly), d.star2 ? U.chipBinary(d.star.type) : U.chipStar(d.star.type), U.chipPl(n)] };
 }
 function unlock(key, quiet) {   // 解锁一条知识库条目（quiet：不提示，由调用方自己提示）
@@ -476,30 +476,25 @@ function know(key, delay = 0) {
 }
 // 进入星系：可能同时触发好几条知识（红矮星 / 红巨星 / 紧凑多行星 / 双星 / 三星）。一次只弹一个窗口，其余静默解锁。
 function enterKnow(sys, ns) {
-  const keys = [...new Set([...['redDwarf', 'redGiant', 'compact'].filter(c => sys.cats?.includes(c)).map(c => 'cat_' + c), ns === 2 ? 'star2' : ns >= 3 ? 'star3' : null, sys.i === 0 ? null : ['star_G', 'star_F', 'star_K', 'star_blue', 'cat_redDwarf'][STAR_COLS.indexOf(sys.color)]])]   // 恒星类型介绍：按主星的颜色（太阳系的太阳不触发；红矮星色的星也算红矮星）
+  const keys = [...new Set([ns === 2 ? 'star2' : ns >= 3 ? 'star3' : null, ...['compact', 'redDwarf', 'redGiant'].filter(c => sys.cats?.includes(c)).map(c => 'cat_' + c), sys.i === 0 ? null : ['star_G', 'star_F', 'star_K', 'star_blue', 'cat_redDwarf'][STAR_COLS.indexOf(sys.color)]])]   // 顺序 = 弹窗优先级：双星 / 三星 > 紧凑多行星系统 > 红矮星 / 红巨星 > 恒星类型；恒星类型介绍：按主星的颜色（太阳系的太阳不触发；红矮星色的星也算红矮星）
     .filter(k => k && KNOW[k] && !knowSeen.has(k) && !knowQ.includes(k));
   const sk = sys.rid ? 'sys_' + sys.rid : null, sysNew = !!(sk && KNOW[sk] && !knowSeen.has(sk) && !knowQ.includes(sk));
   if (!keys.length && !sysNew) return;
   if (!keys.length) { know(sk, 1500); return }   // 通用介绍都看过了：只弹这个系统自己的介绍
-  if (sysNew) knowSup[keys[0]] = sk;             // 否则弹通用介绍，把系统补充块附在里面
+  const sup = [...keys.slice(1), ...(sysNew ? [sk] : [])];   // 同时遇到的其他介绍（比如双星 + 红矮星）和真实星系的介绍，都做成补充块附在第一个弹窗里
+  if (sup.length) knowSup[keys[0]] = sup;
   know(keys[0], 1500);
-  const rest = keys.slice(1);
-  if (rest.length) {
-    rest.forEach(k => { knowSeen.add(k); unlock(k, true) });
-    try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
-    setTimeout(() => toast(T.toast.libMore(rest.length), 'good'), 1800);
-  }
 }
 function knowTry() {
   if (!knowQ.length) return;
-  if (openP || !running || cardHold) { setTimeout(knowTry, 1000); return }   // 有别的面板开着就稍后再弹
+  if (openP || !running || cardHold || warp) { setTimeout(knowTry, 1000); return }   // 有别的面板开着、或正在曲速航行，就稍后再弹
   const key = knowQ.shift(); knowSeen.add(key); unlock(key);
-  const supKey = knowSup[key]; delete knowSup[key];
-  if (supKey) { knowSeen.add(supKey); unlock(supKey, true) }
+  const sups = knowSup[key] || []; delete knowSup[key];
+  sups.forEach(k => { knowSeen.add(k); unlock(k, true) })
   try { localStorage.setItem('deepspace-know', JSON.stringify([...knowSeen])) } catch { }
   const K = knowOf(key), box = $('know').firstElementChild, rich = !!(K.fig || K.figHtml);
   box.classList.remove('lib'); box.classList.toggle('rich', rich);   // 带示意图的用新版排版
-  box.innerHTML = rich ? H.knowRich(K, false, supKey ? H.sysBlock(knowOf(supKey)) : '') : H.knowPlain(K);
+  box.innerHTML = rich ? H.knowRich(K, false, sups.map(k => k.startsWith('sys_') ? H.sysBlock(knowOf(k)) : H.extraBlock(knowOf(k))).join('')) : H.knowPlain(K);
   box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
   openPanel('know'); beep(520, .12, 'triangle', .04);
   if (knowQ.length) setTimeout(knowTry, 1000);
@@ -509,11 +504,12 @@ function openPanel(n) {
   closePanel(); openP = n; panels[n].classList.remove('hidden');
   document.exitPointerLock?.(); mouseHeld = false;
   if (n === 'journal') renderJournal();
-  if (n === 'cards') { cardFilter = pendingFilter; pendingFilter = 'all'; renderCards() }
+  if (n === 'cards') { cardFilter = pendingFilter !== 'all' ? pendingFilter : curSysI >= 0 ? 'cur' : 'all'; pendingFilter = 'all'; renderCards() }   // 每次打开：在星系里默认只看当前星系，不在星系里就显示全部
   if (n === 'lib') renderLib();
   if (n === 'upg') renderUpg(); if (n === 'cargo') renderCargo();
 }
-function closePanel() { if (openP) { panels[openP].classList.add('hidden'); openP = null } }
+let afterKnow = null;   // 关掉某个知识弹窗之后接着要做的事（扫描奇点：先看介绍，再进结局）
+function closePanel() { const was = openP; if (openP) { panels[openP].classList.add('hidden'); openP = null } if (was === 'know' && afterKnow) { const f = afterKnow; afterKnow = null; setTimeout(f, 250) } }
 
 // Toast & 卡片
 function toast(msg, cls = '') {
@@ -546,38 +542,51 @@ function panoURL(i) {
     const sys = systems[i], st = genStars(sys), pl = genPlanets(sys), P = T.pano, done = pl.filter(p => !p.home && s.ids.includes(p.id)).length, tot = pl.filter(p => !p.home).length;
     panoCache.set(key, drawSysPanorama(sys, st, pl, s.ids, {
       title: P.title(sys.name), sub: starTypeText(sys) + T.sys.multi[st.length - 1],
-      starLabel: s.star ? P.starKnown(starClassOf(sys)) : P.starUnknown, count: P.count(done, tot),
+      starLabel: P.starKnown(starClassOf(sys)), starInfo: starInfoLines(sys, st), count: P.count(done, tot),
       date: new Date(s.t).toLocaleString('zh-CN', { hour12: false }), src: sys.rid || sys.real ? P.srcReal : P.srcGen, srcCol: sys.rid || sys.real ? '#7fe0a0' : '#8fa3c4'
     }).toDataURL('image/png'));
   }
   return panoCache.get(key);
 }
+function starInfoLines(sys, st) {   // 全景图右上角的主恒星资料（原来要扫描恒星才能看到的内容）：类型、温度、真实恒星的半径 / 质量 / 距离、耀斑和高温区
+  const cls = starClassOf(sys), d = sys.rid ? byId(sys.rid) : null, U = T.star, P = T.pano, col = d || sys.real ? '#7fe0a0' : '#8fa3c4', z = starZones(st[0].radius), f = sys.flare ?? 1;
+  const lines = [[P.starType(starTypeText(sys)), '#dfe9ff'], [`${U.temp} 约 ${(d ? d.star.teff : STAR_TEMP[cls]).toLocaleString('en')} K`, col]];
+  if (d) lines.push([`${U.radius} ${d.star.r} R☉ · ${U.mass} ${d.star.m} M☉`, col], [`${U.dist} ${d.ly} 光年`, col]);
+  lines.push([P.starFlare(f, Math.round(z.melt), Math.round(z.flare)), '#ffb38a']);
+  return lines;
+}
 function starTypeText(s) { return s.rid ? byId(s.rid).star.type + ' 型恒星' : s.cat === 'redGiant' ? T.sys.redGiant : T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] }
-function shootPano() {
-  if (curSysI < 0) { toast(T.pano.noSys, 'warn'); return }
-  const sys = systems[curSysI], pl = genPlanets(sys), first = !panos[sys.i];
-  panos[sys.i] = { t: Date.now(), ids: pl.filter(p => p.home || discovered.has(p.id)).map(p => p.id), star: starsDone.has(sys.i) };
+function shootPano(si = curSysI, auto = false) {   // auto：扫完全部行星时自动拍一张（不闪白屏）
+  if (si < 0) { toast(T.pano.noSys, 'warn'); return }
+  const sys = systems[si], pl = genPlanets(sys), first = !panos[sys.i];
+  panos[sys.i] = { t: Date.now(), ids: pl.filter(p => p.home || discovered.has(p.id)).map(p => p.id) };
   const done = pl.filter(p => !p.home && discovered.has(p.id)).length, tot = pl.filter(p => !p.home).length;
   if (first) addXp(XP.pano);
-  toast(T.pano.shot(sys.name, done, tot, first ? XP.pano : 0), 'good'); beep(1200, .06, 'square', .04); beep(800, .1, 'square', .04, .07);
+  toast(auto ? T.pano.auto(sys.name, first ? XP.pano : 0) : T.pano.shot(sys.name, done, tot, first ? XP.pano : 0), 'good'); beep(1200, .06, 'square', .04); beep(800, .1, 'square', .04, .07);
   const n = Object.keys(panos).length, mile = first && PANO_MILE[n];
   if (mile) { credits += mile; setTimeout(() => toast(T.pano.mile(n, mile), 'good'), 1600) }
-  const fl = document.createElement('div'); fl.style.cssText = 'position:fixed;inset:0;background:#fff;opacity:.7;pointer-events:none;z-index:50;transition:opacity .5s'; document.body.appendChild(fl);
-  requestAnimationFrame(() => { fl.style.opacity = 0; setTimeout(() => fl.remove(), 600) }); doSave();
+  if (!auto) { const fl = document.createElement('div'); fl.style.cssText = 'position:fixed;inset:0;background:#fff;opacity:.7;pointer-events:none;z-index:50;transition:opacity .5s'; document.body.appendChild(fl);
+  requestAnimationFrame(() => { fl.style.opacity = 0; setTimeout(() => fl.remove(), 600) }) }
+  doSave();
   if (openP === 'cards') renderCards();
 }
 const PANO_MILE = { 5: 200, 10: 500, 20: 1000 };   // 收集到这么多个星系的全景图时，一次性奖励的信用点
-let cardTab = 'planets';
+let cardTab = 'planets', panoSort = 'new';
+try { panoSort = localStorage.getItem('deepspace-panosort') === 'name' ? 'name' : 'new' } catch { }
 (() => {   // 收藏夹顶部的标签：行星卡 / 星系全景（用代码插入，不需要改 index.html）
   const box = $('cflt').parentElement; box.insertAdjacentHTML('beforebegin', `<div id="ctabs" class="c-ctabs"><button data-t="planets">${T.pano.tabPlanets}</button><button data-t="pano">${T.pano.tabPano}</button><button id="panoShot" class="c-shot">${T.pano.shoot}</button></div>`);
   $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.onclick = () => { cardTab = b.dataset.t; b.blur(); renderCards() });
   $('panoShot').onclick = e => { e.target.blur(); shootPano() };
+  $('panoShot').insertAdjacentHTML('afterend', `<select id="panoSort" class="c-sort"><option value="new">${T.pano.sortNew}</option><option value="name">${T.pano.sortName}</option></select>`);
+  $('panoSort').value = panoSort; $('panoSort').onchange = e => { panoSort = e.target.value; try { localStorage.setItem('deepspace-panosort', panoSort) } catch { } e.target.blur(); renderCards() };
 })();
+const panoOrder = () => Object.keys(panos).map(Number).sort(panoSort === 'name' ? (a, b) => systems[a].name.localeCompare(systems[b].name) : (a, b) => panos[b].t - panos[a].t || b - a);   // 默认最新的在最上面；也可按名字排
 function renderCards() {
   $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === cardTab));
+  $('panoSort').style.display = cardTab === 'pano' ? '' : 'none';
   $('cflt').parentElement.style.display = cardTab === 'pano' ? 'none' : ''; $('cgrid').classList.toggle('pano', cardTab === 'pano');
   if (cardTab === 'pano') {
-    const list = Object.keys(panos).map(Number).sort((a, b) => a - b);
+    const list = panoOrder();
     $('cgrid').innerHTML = list.length ? list.map(i => H.cardImgHtml(panoURL(i), systems[i].name + ' 全景')).join('') : H.emptyHtml(T.pano.empty);
     const imgs = [...$('cgrid').querySelectorAll('img')]; imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) }); return;
   }
@@ -618,6 +627,9 @@ function flyIn(el, { hold = 2200, fly = 650, tail = 3900, scale = 1.35, endScale
 
 // 第一次扫描某类行星：返回要显示在卡片上的介绍（只出现一次）
 function kindNote(p) {
+  const r = kindNote0(p); unlock('units', true); return r   // 第一次扫描行星后，顺便解锁「天文单位」（卡片上有 AU / R⊕ / M⊕）
+}
+function kindNote0(p) {
   const key = p.cat ? 'cat_' + p.cat : 'kind_' + p.kind;   // 特别的类别（热木星等）优先，普通的岩石 / 气态 / 冰巨介绍留到扫描普通行星时
   if (!KNOW[key] || knowSeen.has(key)) return '';
   knowSeen.add(key); unlock(key);
@@ -626,6 +638,15 @@ function kindNote(p) {
 }
 let cardAnim;
 let cardHold = false, cardHoldMs = 0;
+function collectWait(si) {   // 扫完全部行星：等卡片消失再打开收藏页（以前是固定 3.5 秒，卡片还在飞就弹出来了）
+  collectPending = true;
+  const t = setInterval(() => {
+    if (openP === 'cards') { clearInterval(t); collectPending = false; return }   // 玩家自己打开了收藏
+    if (openP || cardHold || !$('card').classList.contains('hidden')) return;
+    clearInterval(t); collectPending = false; cardTab = 'pano'; openPanel('cards');   // 先打开收藏页的「星系全景」，再直接放大刚拍的这张（关掉大图就回到收藏页）
+    bigList = [...$('cgrid').querySelectorAll('img')]; const k = panoOrder().indexOf(si); if (k >= 0 && bigList[k]) showBig(k);
+  }, 400);
+}
 function showCard(p, isNew) {
   const i = p.info, c = $('card'), note = kindNote(p);
   c.innerHTML = H.cardPop(cardURL(p), note, isNew ? H.cardReward(i.value, i.fuelGain) : T.cards.collected);
@@ -767,7 +788,10 @@ function showEnding() {
   const m = Math.floor(playTime / 60), s = Math.floor(playTime % 60);
   $('endStats').innerHTML = T.ending.stats(m, s, visited.size, systems.length, discovered.size, beaconsGot.size);
   [392, 523, 659, 784, 1047].forEach((f, i) => beep(f, .5, 'triangle', .06, i * .18));
-  target = null; doSave(); openPanel('ending');
+  target = null; doSave();
+  const K = knowOf('blackhole'), box = $('know').firstElementChild;   // 先弹出黑洞介绍，关掉之后再进入结局
+  box.classList.remove('lib'); box.classList.add('rich'); box.innerHTML = H.knowRich(K, false); box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
+  afterKnow = () => openPanel('ending'); openPanel('know');
 }
 
 let scanT = 0, scanId = null, scanCand = null;
@@ -835,11 +859,11 @@ const STAGES = [
       ok: () => lookAcc > 400 && MOVES.every(x => did['Key' + x[1]])
     }]
   },
-  {   // 1 完成第一次扫描：收藏与货舱
+  {   // 1 完成第一次扫描：收藏、货舱、日志、知识库
     name: T.tut.stageNames[1], trigger: () => discovered.size >= 1, steps: [{
-      reset: ['KeyK', 'KeyI', 'KeyJ'],
+      reset: T.tut.scanChips.map(([code]) => code),
       t: () => H.tutScan(T.tut.scanChips.map(([code]) => !!did[code])),
-      ok: () => did.KeyK && did.KeyI && did.KeyJ
+      ok: () => T.tut.scanChips.every(([code]) => did[code])
     }]
   },
   {   // 2 完成一个星系
@@ -1008,38 +1032,10 @@ function hazards(dt) {
   inBelt = now;
 }
 // ---- 恒星扫描 ----
-const STAR_CLASS = ['G', 'F', 'K', 'A', 'M'], STAR_KEY = { G: 'star_G', F: 'star_F', K: 'star_K', A: 'star_blue', M: 'cat_redDwarf', RG: 'cat_redGiant' };
+const STAR_CLASS = ['G', 'F', 'K', 'A', 'M'];
 const STAR_TEMP = { G: 5700, F: 6600, K: 4600, A: 8500, M: 3200, RG: 4000 };   // 游戏里生成的恒星：各类型的典型温度（设定值）
 const starClassOf = s => s.rid ? byId(s.rid).star.type[0] : s.cat === 'redGiant' ? 'RG' : STAR_CLASS[Math.max(0, STAR_COLS.indexOf(s.color))];
-function showStarCard(sys, gain) {
-  const cls = starClassOf(sys), d = sys.rid ? byId(sys.rid) : null;
-  const U = T.star, tg = (k, t) => `<span class="c-tag-${k}">${t}</span>`, R = genStars(sys)[0].radius, z = starZones(R);
-  const typeTxt = d ? d.star.type + ' 型恒星' : cls === 'RG' ? T.sys.redGiant : T.sys.starTypes[STAR_CLASS.indexOf(cls)];
-  const rows = [`${U.type}：${typeTxt} ${tg(d ? 'm' : 'g', d ? U.measured : U.generated)}`,
-    `${U.temp}：约 ${(d ? d.star.teff : STAR_TEMP[cls]).toLocaleString('en')} K ${tg(d ? 'm' : 'g', d ? U.measured : U.generated)}`];
-  if (d) rows.push(`${U.radius}：${d.star.r} 倍太阳 ${tg('m', U.measured)}`, `${U.mass}：${d.star.m} 倍太阳 ${tg('m', U.measured)}`, `${U.dist}：${d.ly} 光年 ${tg('m', U.measured)}`);
-  const f = sys.flare ?? 1, K = {
-    title: U.title(sys.name), fig: STAR_KEY[cls], tag: d ? U.tagReal : U.tagGen, chips: [typeTxt.split(' ')[0], `约 ${(d ? d.star.teff : STAR_TEMP[cls]).toLocaleString('en')} K`],
-    sec: [['📊', U.data, rows.join('<br>')],
-      ['⚡', U.flareHead, U.flare(f, Math.round(z.melt), Math.round(z.flare))],
-      ['🏅', U.reward, gain ? U.gain(gain) : U.again]]
-  };
-  const box = $('know').firstElementChild; box.classList.remove('lib'); box.classList.add('rich');
-  box.innerHTML = H.knowRich(K, false); box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
-  openPanel('know');
-}
-function completeStar(c) {
-  const sys = c.star, first = !starsDone.has(sys.i), cls = starClassOf(sys);
-  let gain = 0;
-  if (first) {
-    const newCls = ![...starsDone].some(i => starClassOf(systems[i]) === cls);
-    starsDone.add(sys.i); gain = 20 + (newCls ? 30 : 0); addXp(gain); unlock(STAR_KEY[cls], true); doSave();
-    [660, 880, 1100].forEach((f, i) => beep(f, .18, 'triangle', .06, i * .09));
-  } else beep(500, .1);
-  showStarCard(sys, gain);
-}
 function completeScan(c) {
-  if (c.star) { completeStar(c); return }
   if (c.id === 'bh') {
     if (bhDone) { toast(T.toast.bhRecorded); return }
     if (frags < FRAG_N) { toast(T.toast.bhEcho(frags, FRAG_N), 'warn'); beep(120, .5, 'sine', .06); return }
@@ -1059,8 +1055,8 @@ function completeScan(c) {
       const gain = sysGain(sys);
       if (!doneSys.has(sys.i)) { doneSys.add(sys.i); addXp(gain) }
       toast(T.toast.sysComplete(sys.name, gain), 'good');
-      collectPending = true;   // 晋升弹窗要等收藏关闭之后
-      setTimeout(() => { collectPending = false; if (openP !== 'cards') { cardTab = 'planets'; pendingFilter = String(sys.i); openPanel('cards') } }, 3500);
+      shootPano(sys.i, true);   // 完成星系扫描：自动拍下这个星系的全景图
+      collectWait(sys.i);   // 收藏页要等行星卡片飞走（或玩家关掉介绍）、其他面板都关了才弹；晋升弹窗再排在收藏之后
     }
   } else beep(500, .1);
   takeSample(p);
@@ -1197,10 +1193,6 @@ function update(dt) {
   };
   if (!warp) {
     for (const L of loaded) for (const pl of L.planets) { if (!pl.show || pl.p.home) continue; pl.mesh.getWorldPosition(tV2); test(pl.p.id, tV2, pl.p.radius * 1.2 + .5, scanRange(), { p: pl.p, name: pl.p.name }) }
-    for (const L of loaded) {   // 主恒星：要在安全距离外（3R）、也不能太远（7R）才能扫描
-      const s = L.stars[0]; if (!s) continue; const R = s.st.radius;
-      tV2.copy(s.mesh.position).add(L.sys.pos); test('star:' + L.sys.i, tV2, R * 1.05, R * 7, { star: L.sys, R, name: starsDone.has(L.sys.i) ? L.sys.name : T.hud.unknownStar }, R * 3);
-    }
     test('bh', bh.position, BH_T.effR, BH_T.range, { name: BH_T.name });
   }
   scanCand = cand;
@@ -1261,7 +1253,7 @@ function updateHUD() {
   let pr = '';
   if (warp) pr = T.hud.promptWarp(warp.target.name);
   else if (scanCand) {
-    const known = scanCand.p ? discovered.has(scanCand.p.id) : scanCand.star ? starsDone.has(scanCand.star.i) : bhDone;
+    const known = scanCand.p ? discovered.has(scanCand.p.id) : bhDone;
     pr = T.hud.promptScan(scanCand.p && !known ? T.hud.unknownBody : scanCand.name, Math.round(scanCand.d), known);   // 还没扫描过的行星不显示名字
   } else if (scooping) pr = T.ui.scooping;
   else if (document.pointerLockElement !== renderer.domElement && !openP) pr = T.ui.pointerLock;

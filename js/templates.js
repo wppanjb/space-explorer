@@ -115,6 +115,11 @@ const figBelt = L => svgOpen + `<ellipse cx="180" cy="76" rx="150" ry="52" fill=
   <circle cx="180" cy="76" r="9" fill="#ffd27a"/><circle cx="180" cy="76" r="18" fill="#ffd27a" opacity=".2"/>
   <circle cx="248" cy="76" r="4" fill="#c9623a"/><circle cx="318" cy="76" r="9" fill="#d9b48a"/>
   ${lab(248, 62, L.mars, '#c9623a')}${lab(180, 144, L.belt, '#c2b8a6')}${lab(318, 62, L.jup, '#d9b48a')}</svg>`;
+const figUnits = L => svgOpen + `<circle cx="78" cy="72" r="52" fill="#d9b48a"/><ellipse cx="78" cy="58" rx="52" ry="6" fill="#b88a5a" opacity=".35"/><ellipse cx="78" cy="86" rx="52" ry="5" fill="#b88a5a" opacity=".3"/><circle cx="160" cy="112" r="4.65" fill="#3a7bd5"/>
+  ${lab(78, 140, L.j, '#d9b48a')}${lab(160, 132, L.e, '#7fb4ff')}
+  <line x1="214" y1="76" x2="338" y2="76" stroke="#7fd4ff" stroke-opacity=".35"/><circle cx="214" cy="76" r="8" fill="#ffd27a"/><circle cx="237" cy="76" r="3" fill="#3a7bd5"/><circle cx="334" cy="76" r="7" fill="#d9b48a"/>
+  <line x1="214" y1="94" x2="237" y2="94" stroke="#ffd27a"/><line x1="214" y1="104" x2="334" y2="104" stroke="#d9b48a" stroke-opacity=".7"/>
+  ${lab(214, 60, L.sun, '#ffd27a')}${lab(237, 118, L.au, '#ffd27a')}${lab(274, 122, L.ju, '#d9b48a')}${lab(334, 60, L.jp, '#d9b48a')}</svg>`;
 const figRing = L => svgOpen + `<circle cx="130" cy="74" r="28" fill="#ead9a8"/><ellipse cx="130" cy="74" rx="78" ry="16" fill="none" stroke="#d8c690" stroke-width="7" opacity=".8" transform="rotate(-12 130 74)"/><ellipse cx="130" cy="74" rx="62" ry="12" fill="none" stroke="#bda878" stroke-width="3" opacity=".7" transform="rotate(-12 130 74)"/>
   <circle cx="258" cy="46" r="6" fill="#d9c9a0"/><circle cx="296" cy="84" r="4" fill="#b9b2a4"/><circle cx="238" cy="104" r="3" fill="#9aa7bd"/><circle cx="322" cy="52" r="2.4" fill="#9aa7bd"/>
   ${lab(130, 128, L.ring, '#d8c690')}${lab(280, 128, L.moons, '#b9c4d8')}</svg>`;
@@ -127,7 +132,7 @@ const figBH = L => svgOpen + `<defs><radialGradient id="gBd" cx=".5" cy=".5" r="
   <ellipse cx="180" cy="76" rx="120" ry="26" fill="url(#gBd)" opacity=".85"/><circle cx="180" cy="76" r="26" fill="none" stroke="#ffd9a0" stroke-opacity=".35" stroke-width="3"/><circle cx="180" cy="76" r="20" fill="#000"/>
   <path d="M60 76a120 26 0 0 1 240 0" fill="none" stroke="#ffb04a" stroke-opacity=".5" stroke-width="2"/>
   ${lab(180, 126, L.horizon, '#c9d6ee')}${lab(70, 40, L.disk, '#ffb04a')}${lab(180, 20, L.tide, '#ff9a8a')}</svg>`;
-const FIGS = { star2: figStar2, star3: figStar3, cat_redDwarf: figRedDwarf, cat_redGiant: figRedGiant, cat_compact: figCompact, star_blue: figBlue, star_G: figSpec('G', '#ffd27a', 14), star_F: figSpec('F', '#fff2c8', 16), star_K: figSpec('K', '#ffae6a', 11), kind_rock: figRock, kind_gas: figGas, kind_ice: figIce, cat_hotJupiter: figHotJ, cat_lava: figLava, cat_ocean: figOcean, cat_superEarth: figSuper, belt: figBelt, ringMoon: figRing, flare: figFlare, blackhole: figBH };
+const FIGS = { units: figUnits, star2: figStar2, star3: figStar3, cat_redDwarf: figRedDwarf, cat_redGiant: figRedGiant, cat_compact: figCompact, star_blue: figBlue, star_G: figSpec('G', '#ffd27a', 14), star_F: figSpec('F', '#fff2c8', 16), star_K: figSpec('K', '#ffae6a', 11), kind_rock: figRock, kind_gas: figGas, kind_ice: figIce, cat_hotJupiter: figHotJ, cat_lava: figLava, cat_ocean: figOcean, cat_superEarth: figSuper, belt: figBelt, ringMoon: figRing, flare: figFlare, blackhole: figBH };
 
 // ---------- 知识介绍弹窗 ----------
 /** 双星 / 三星：带示意图的排版 */
@@ -150,12 +155,13 @@ export function orbitFig(f) {
   return s + `<text x="${W - 6}" y="${H - 6}" fill="#6f7f9c" font-size="8.5" text-anchor="end">${L.note}</text></svg>`;
 }
 /** 弹窗里的「系统补充块」：放在通用介绍的第一节后面。K = 系统条目（含 chips、short） */
+export const extraBlock = K => `<div class="c-sysblock"><div class="ktag">${T.know.extraUi.tag}</div><h3>${K.title}</h3><div class="kchips">${K.chips.map(c => `<span class="kchip">${c}</span>`).join('')}</div><p>${K.sec[0][2]}</p><div class="hint">${T.know.extraUi.more}</div></div>`;   // 同时遇到的其他介绍：标题 + 标签 + 第一段（「这是什么」）
 export const sysBlock = K => `<div class="c-sysblock"><div class="ktag">${T.know.sysUi.tag}</div><h3>${T.know.sysUi.head(K.title)}</h3><div class="kchips">${K.chips.map(c => `<span class="kchip">${c}</span>`).join('')}</div><p>${K.short}</p><div class="hint">${T.know.sysUi.more}</div></div>`;
 export function knowRich(K, lib = false, sup = '') {
   const secs = K.sec.map(([ico, h, p, cls]) => `<div class="ksec ${cls || ''}"><div class="kico">${ico}</div><div><h4>${h}</h4><p>${p}</p></div></div>`);
   if (sup) secs.splice(1, 0, sup);   // 补充块放在第一节（"这是什么"）后面
   return (K.figHtml ?? FIGS[K.fig](T.know.figs[K.fig])) + `<div class="kbody"><h2>📖 ${K.title}</h2><div class="ktag">${K.tag}</div>
-    <div class="kchips">${K.chips.map(c => `<span class="kchip">${c}</span>`).join('')}</div>` +
+    <div class="kchips">${(K.real ? ['🌍 ' + T.know.sysUi.tag, ...K.chips] : K.chips).map(c => `<span class="kchip">${c}</span>`).join('')}</div>` +   // 真实星系单独弹出 / 在知识库里时，第一个标签注明「真实星系」
     secs.join('') + (K.src ? `<div class="c-ksrc">${T.know.sysUi.srcHead}${K.src}</div>` : '') +
     (lib ? '' : `<div class="kfoot"><span class="hint">${T.ui.closeHint}</span><button id="knowOk2">${T.ui.gotIt}</button></div>`) + '</div>';
 }

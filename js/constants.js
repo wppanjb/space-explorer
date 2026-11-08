@@ -1,7 +1,7 @@
 // 全局常量与剧情文本
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';
 // TAU = 2π，GR = 银河半径，HOME_POS = 初始星系位置
-export const TAU = Math.PI * 2, GR = 800, HOME_POS = [352, 0, 96];
+export const TAU = Math.PI * 2, GR = 1100, HOME_POS = [484, 0, 132];
 export const ROMAN = ['I','II','III','IV','V','VI','VII','VIII'];
 export const STAR_COLS = [[1,.85,.6],[1,.95,.8],[1,.7,.45],[.8,.88,1],[1,.6,.4]];
 export const SAVE_KEY = 'deepspace-explorer-save-v1';

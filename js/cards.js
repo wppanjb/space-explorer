@@ -171,6 +171,13 @@ function floater(g, x, y, s, col) {
 
 // ---------- 主函数 ----------
 // stars：该星系的恒星数组 [{color, radius}, ...]（来自 genStars）；也兼容只传一个颜色 [r,g,b]
+/** 生成行星的半径 / 质量 / 轨道 / 周期：从游戏里的大小（radius）和距离（dist = 30 × √AU）按太阳系的比例换算，只用于卡片显示 */
+function genPhys(p) {
+  const au = (p.dist / 30) ** 2, r = p.kind === 'gas' ? p.radius * 1.87 : p.kind === 'ice' ? p.radius * 1.1 : p.radius / 2;
+  const m = p.kind === 'gas' ? 318 * (r / 11.2) ** 2.5 : p.kind === 'ice' ? 17.1 * (r / 3.88) ** 3 : r ** 3.5;
+  return { au, earthR: +r.toFixed(2), earthM: +m.toPrecision(3), periodDays: 365.25 * au ** 1.5 };
+}
+
 export function drawPlanetCard(p, stars, W = 480, H = 640) {
   if (typeof stars[0] === 'number') stars = [{ color: stars, radius: 7 }];
   const starColor = stars[0].color, nStars = stars.length;
@@ -230,30 +237,38 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
   const ig = g.createLinearGradient(0, SH, 0, H); ig.addColorStop(0, '#0b1424'); ig.addColorStop(1, '#060b16'); g.fillStyle = ig; g.fillRect(0, SH, W, H - SH);
   g.fillStyle = rar.col; g.fillRect(0, SH, W, 3);
   g.fillStyle = '#e8f1ff'; g.font = 'bold 26px "Microsoft YaHei",sans-serif'; g.fillText(p.name, 24, SH + 40);
-  const subFont = '15px "Microsoft YaHei",sans-serif', subTxt = `${KIND[p.kind]} · ${rar.name}${rar.n ? ' ' + '★'.repeat(rar.n) : ''}${nStars > 1 ? ' · ' + ['', '双星系统', '三星系统'][nStars - 1] : ''}`;
+  const subFont = '15px "Microsoft YaHei",sans-serif', subTxt = `${KIND[p.kind]} · ${rar.name}${rar.n ? ' ' + '★'.repeat(rar.n) : ''}`;
   g.fillStyle = rar.col; g.font = subFont; g.fillText(subTxt, 24, SH + 64);
-  if (p.real && !p.home) { const w = g.measureText(subTxt).width; g.fillStyle = p.cand || p.padded ? '#ffd27a' : '#7fe0a0'; g.fillText(p.cand ? ' · 候选行星' : p.padded ? ' · 推测行星' : ' · 真实行星', 24 + w, SH + 64) }   // 真实行星标签单独上色（绿 = 真实，黄 = 候选 / 推测）
+  {   // 副标题后面接来源标签：真实 / 候选 / 推测 / 生成行星；太阳系和生成的行星再接卫星数（系外真实行星没有卫星资料，不写）
+    const lab = !p.real ? ' · 生成行星' : p.cand ? ' · 候选行星' : p.padded ? ' · 推测行星' : ' · 真实行星', w0 = g.measureText(subTxt).width, w1 = g.measureText(lab).width;
+    g.fillStyle = !p.real ? TAG_COL.生成 : p.cand || p.padded ? '#ffd27a' : '#7fe0a0'; g.fillText(lab, 24 + w0, SH + 64);
+    if (!p.real || p.sysLy == null) { const n = p.real ? p.knownMoons : p.moons; g.fillStyle = p.real ? TAG_COL[p.src.orbit] : TAG_COL.生成; g.fillText(n > 0 ? ` · 卫星 ${n} 颗` : ' · 无卫星', 24 + w0 + w1, SH + 64) }
+  }
   g.fillStyle = '#b8c7e0'; g.font = '15px "Microsoft YaHei",monospace';
-  // 每行是 [[文字, 来源标签], [文字, 来源标签]]；来源标签只有真实行星才显示（实测 / 推测 / 生成）
-  const real = p.real && !p.home, tg = k => real ? (p.src[k] ?? p.src.env) : null, ex = p.au != null;   // ex：系外行星，多显示半径 / 质量 / 轨道
+  // 每行是 [[文字, 来源标签], [文字, 来源标签]]；真实天体的【数值】按来源标签上色（绿 = 实测，黄 = 推测，灰蓝 = 生成），项目名不变色
+  const real = p.real, tg = k => real ? (p.src[k] ?? p.src.env) : '生成';   // 生成的行星所有数据都是「生成」
+  // 生成行星没有半径 / 质量 / 轨道 / 周期的真实数据：由游戏里的大小和距离换算成同样的格式（不用随机数，不影响星系生成）
+  const ph = real ? p : genPhys(p), ex = ph.au != null;   // ex：有轨道数据的真实行星（太阳系 + 系外），多显示半径 / 质量 / 轨道 / 周期
   const rows = [
-    [[`温度 ${i.temp}°C`, tg('env')], [`重力 ${i.g} g`, tg('env')]],
-    [[`大气 ${i.atm}`, tg('atm')], [`资源 ${i.res}`, tg('res')]],
-    p.home ? [['生命 有'], [`已知卫星 ${p.knownMoons} 颗`]] : [[`生命 ${i.life}`, tg('life')], [`样本价值 ${i.value}`, tg('value')]],
+    [['温度', `${i.temp}°C`, tg('env')], ['重力', `${i.g} g`, tg('env')]],
+    [['大气', i.atm, tg('atm')], ['资源', i.res, tg('res')]],
+    p.home ? [['生命', '有', tg('life')]] : [['生命', i.life, tg('life')], ['样本价值', i.value, tg('value')]],
   ];
   if (ex) {
-    rows.push([[`半径 ${p.earthR} R⊕`, p.src.size], [`质量 ${p.earthM} M⊕`, p.src.mass]]);
-    rows.push([[`轨道 ${+p.au.toPrecision(3)} AU`, p.src.orbit], [p.periodDays >= 1000 ? `周期 ${(p.periodDays / 365.25).toFixed(1)} 年` : `周期 ${+p.periodDays.toPrecision(3)} 天`, p.src.orbit]]);
-  } else if (real) rows.push([[p.knownMoons > 0 ? `已知卫星 ${p.knownMoons} 颗` : '无卫星', p.src.orbit]]);   // 太阳系：写真实的卫星数量
+    rows.push([['半径', `${ph.earthR} R⊕`, tg('size')], ['质量', `${ph.earthM} M⊕`, tg('mass')]]);
+    rows.push([['轨道', `${+ph.au.toPrecision(3)} AU`, tg('orbit')], ph.periodDays >= 1000 ? ['周期', `${(ph.periodDays / 365.25).toFixed(1)} 年`, tg('orbit')] : ['周期', `${+ph.periodDays.toPrecision(3)} 天`, tg('orbit')]]);
+  }
   const y0 = SH + (rows.length > 4 ? 94 : 100), dy = rows.length > 4 ? 26 : 28;
-  const item = (it, x, y) => {
-    if (!it) return; g.fillStyle = '#b8c7e0'; g.font = '15px "Microsoft YaHei",monospace'; g.fillText(it[0], x, y);
-    if (it[1]) { const w = g.measureText(it[0]).width; g.fillStyle = TAG_COL[it[1]]; g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText(it[1], x + w + 6, y) }
+  const item = (it, x, y) => {   // it = [名称, 数值, 来源标签]：名称统一用浅蓝灰色，只有数值按来源上色
+    if (!it) return; g.font = '15px "Microsoft YaHei",monospace';
+    g.fillStyle = '#b8c7e0'; const lw = g.measureText(it[0] + ' ').width; g.fillText(it[0], x, y);
+    g.fillStyle = it[2] ? TAG_COL[it[2]] : '#b8c7e0'; g.fillText(it[1], x + lw, y);
   };
   rows.forEach((r, k) => { item(r[0], 24, y0 + k * dy); item(r[1], W / 2 + 10, y0 + k * dy) });
-  if (real) {   // 右下角图例
+  {   // 右下角图例
     g.font = '11px "Microsoft YaHei",sans-serif'; let x = W - 24;
     for (const t of ['生成', '推测', '实测']) { const w = g.measureText(t).width; x -= w; g.fillStyle = TAG_COL[t]; g.fillText(t, x, H - 18); x -= 10 }
+    const lbl = '数据来源：'; g.fillStyle = '#5c6b86'; g.fillText(lbl, x + 10 - g.measureText(lbl).width, H - 18);   // 图例前缀：数值的颜色 = 数据来源
   }
   g.fillStyle = '#5c6b86'; g.font = '12px monospace'; g.fillText('DEEP SPACE EXPLORER', 24, H - 18);
   g.restore(); g.strokeStyle = rar.col; g.lineWidth = 3; g.beginPath(); g.roundRect(1.5, 1.5, W - 3, H - 3, 18); g.stroke();
@@ -262,6 +277,7 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
 
 // ---------- 星系全景图（示意图）：俯视图，已扫描的行星画实心，没扫描的只画轨道和虚线圈 ----------
 // meta = { title, sub, starLabel, count, date, src, srcCol }；snapIds = 拍摄时已扫描的行星 id（出发点始终算已知）
+const ORBIT_COLS = ['#ff7a7a', '#ffb347', '#ffe066', '#7be08a', '#5fd4e8', '#6f9bff', '#c18bff', '#ff8ad8'];   // 全景图里各条行星轨道的颜色
 export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H = 450) {
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
   g.fillStyle = '#04060f'; g.fillRect(0, 0, W, H);
@@ -270,14 +286,29 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
   const cx = W / 2, cy = H / 2 + 14, tilt = .4, ids = new Set(snapIds);
   const maxD = Math.max(60, ...planets.map(p => p.dist)), rx = d => 64 + 290 * Math.sqrt(d / maxD);
   const sc = stars[0].color, sr = Math.max(14, Math.min(46, 10 + stars[0].radius * 1.6));
+  // 轨道：和游戏里一样带离心率（恒星在焦点上）、倾角和升交点方向；用固定的斜俯视角度投影到画面上
+  const sinP = tilt, cosP = Math.sqrt(1 - tilt * tilt);
+  const orbitOff = (p, E) => {   // 返回 [dx, dy]：相对恒星的画面偏移（未缩放）
+    const a = rx(p.dist), x0 = a * (Math.cos(E) - p.ecc), z0 = -a * Math.sqrt(1 - p.ecc * p.ecc) * Math.sin(E), inc = p.inc || 0, nd = p.node || 0;
+    const y1 = -z0 * Math.sin(inc), z1 = z0 * Math.cos(inc);   // 先按倾角抬起，再绕竖轴转到升交点方向（和游戏里 rotation.set(inc, node, 0, 'YXZ') 一致）
+    const X = x0 * Math.cos(nd) + z1 * Math.sin(nd), Z = -x0 * Math.sin(nd) + z1 * Math.cos(nd);
+    return [X, Z * sinP - y1 * cosP];
+  };
+  const kep = (M, e) => { let E = M; for (let k = 0; k < 6; k++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E)); return E };
+  const paths = planets.map(p => Array.from({ length: 73 }, (_, k) => orbitOff(p, k / 72 * 6.283185)));
+  let fit = 1;   // 倾斜 / 偏心的轨道可能伸出画面：整体缩小一点装进去
+  for (const path of paths) for (const [dx, dy] of path) fit = Math.min(fit, 372 / Math.max(1, Math.abs(dx)), dy < 0 ? (cy - 72) / -dy : (H - 36 - cy) / Math.max(1, dy));
   // 小行星带
   if (sys.belt) {
-    const [a, b] = sys.belt, r1 = rx(a), r2 = rx(b), br = mulberry32(sys.seed ^ 0xbe17);
+    const [a, b] = sys.belt, r1 = rx(a) * fit, r2 = rx(b) * fit, br = mulberry32(sys.seed ^ 0xbe17);
     for (let i = 0; i < 260; i++) { const t = br() * 6.283, r = r1 + (r2 - r1) * br(); g.fillStyle = `rgba(190,180,165,${.25 + br() * .4})`; g.fillRect(cx + Math.cos(t) * r, cy + Math.sin(t) * r * tilt, 1.6, 1.6) }
   }
-  // 轨道
-  g.lineWidth = 1;
-  for (const p of planets) { const r = rx(p.dist); g.strokeStyle = ids.has(p.id) || p.home ? 'rgba(127,212,255,.32)' : 'rgba(127,212,255,.14)'; g.setLineDash(ids.has(p.id) || p.home ? [] : [3, 5]); g.beginPath(); g.ellipse(cx, cy, r, r * tilt, 0, 0, 6.283); g.stroke() }
+  // 轨道线
+  g.lineWidth = 1.3;
+  planets.forEach((p, i) => {
+    const known = ids.has(p.id) || p.home; g.strokeStyle = ORBIT_COLS[i % ORBIT_COLS.length]; g.globalAlpha = known ? .8 : .3; g.setLineDash(known ? [] : [3, 5]); g.beginPath();   // 每条轨道一个颜色（按顺序轮换，不暴露行星本身的颜色）；已扫描的更亮
+    paths[i].forEach(([dx, dy], k) => k ? g.lineTo(cx + dx * fit, cy + dy * fit) : g.moveTo(cx + dx * fit, cy + dy * fit)); g.stroke(); g.globalAlpha = 1;
+  });
   g.setLineDash([]);
   // 恒星（多星系统：伴星画在旁边）
   const glow = g.createRadialGradient(cx, cy, sr * .3, cx, cy, sr * 3.2); glow.addColorStop(0, css(sc, .55)); glow.addColorStop(1, css(sc, 0));
@@ -286,7 +317,7 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
   stars.slice(1).forEach((s, i) => { const x = cx + (i ? -1 : 1) * (sr + 20 + i * 10), y = cy - sr * .6 - i * 6, r = Math.max(5, Math.min(16, 4 + s.radius * .9)); g.fillStyle = css(mix(s.color, [1, 1, 1], .3)); g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill() });
   g.textAlign = 'center'; g.font = '12px "Microsoft YaHei",sans-serif'; g.fillStyle = '#c9d6ee'; g.fillText(meta.starLabel, cx, cy + sr + 18);
   // 行星（靠下的画在前面）
-  const spots = planets.map(p => { const r = rx(p.dist); return { p, x: cx + Math.cos(p.phase) * r, y: cy + Math.sin(p.phase) * r * tilt } }).sort((a, b) => a.y - b.y);
+  const spots = planets.map(p => { const [dx, dy] = orbitOff(p, kep(p.phase, p.ecc)); return { p, x: cx + dx * fit, y: cy + dy * fit } }).sort((a, b) => a.y - b.y);
   for (const { p, x, y } of spots) {
     const known = ids.has(p.id) || p.home, pr = Math.max(5, Math.min(17, 3.5 + p.radius * 2.1));
     if (known) {
@@ -305,6 +336,11 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
   g.fillStyle = '#9fb4d6'; g.font = '13px "Microsoft YaHei",sans-serif'; g.fillText(meta.sub, 24, 60);
   g.fillStyle = meta.srcCol; g.fillText(meta.src, 24, H - 18);
   g.textAlign = 'right'; g.fillStyle = '#9fb4d6'; g.fillText(`${meta.count}  ·  ${meta.date}`, W - 24, H - 18);
+  if (meta.starInfo?.length) {   // 右上角：主恒星资料（类型、温度、真实恒星的半径 / 质量 / 距离、耀斑和高温区），数值按来源上色（绿 = 实测，灰蓝 = 生成）
+    g.font = '12px "Microsoft YaHei",sans-serif'; const lw = Math.max(...meta.starInfo.map(l => g.measureText(l[0]).width)), bh = 14 + meta.starInfo.length * 18;
+    g.fillStyle = 'rgba(8,14,30,.72)'; g.beginPath(); g.roundRect(W - 24 - lw - 20, 12, lw + 28, bh, 8); g.fill();
+    g.textAlign = 'right'; meta.starInfo.forEach((l, i) => { g.fillStyle = l[1]; g.fillText(l[0], W - 24, 33 + i * 18) });
+  }
   g.textAlign = 'left'; g.strokeStyle = 'rgba(127,212,255,.3)'; g.lineWidth = 2; g.strokeRect(1, 1, W - 2, H - 2);
   return cv;
 }

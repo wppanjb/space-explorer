@@ -7,7 +7,7 @@ import { makeRng, lerp } from './rng.js';
 
 const SYL = ["ae", "ky", "or", "ven", "ta", "lu", "xi", "ra", "mo", "zen", "thal", "is", "ur", "no", "va", "kar", "el", "dra"];
 
-export function genGalaxy(R, n = 45000, arms = 4, spin = 4.2) {
+export function genGalaxy(R, n = 80000, arms = 4, spin = 4.2) {
   const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), core = [1, .82, .55], edge = [.45, .65, 1];
   for (let i = 0; i < n; i++) {
     let x, y, z, t;
@@ -72,7 +72,7 @@ export function genSystems(R, gal, count = 45) {
     const k = R.int(0, N - 1), x = gal.pos[k * 3], y = gal.pos[k * 3 + 1], z = gal.pos[k * 3 + 2], r = Math.hypot(x, z);
     if (r < 200 || r > GR * .95) continue;
     const p = new THREE.Vector3(x, y * .3, z);
-    if (list.some(s => s.pos.distanceTo(p) < 150)) continue;
+    if (list.some(s => s.pos.distanceTo(p) < 200)) continue;
     mk([x, y * .3, z], false);
   }
   sampleReal(list);   // 抽一批真实星系换进去（用独立随机数，其余宇宙不变）
