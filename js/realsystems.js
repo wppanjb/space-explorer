@@ -13,7 +13,7 @@
 // 以后要加星系：照着下面的格式往 LIB 里加一项就行，不用改别的地方。
 // =====================================================================
 import { makeRng } from './rng.js';
-import { LIFE_BONUS, STAR_COLS } from './constants.js';
+import { LIFE_BONUS, STAR_COLS, rockRes } from './constants.js';
 import { SRC } from './real.js';
 
 const MJ = 317.83, RJ = 11.209;   // 木星质量/半径（地球 = 1）
@@ -160,7 +160,6 @@ export function buildRealStars(sys) {
 const STAR_COLOR = i => STAR_COLS[i];
 
 // ---------- 行星 ----------
-const rockRes = ['金属矿', '稀土', '水冰', '晶体', '硅酸盐'];
 const massFromRadius = re => re < 1.6 ? re ** 3.5 : re < 10 ? (re / .9) ** (1 / .59) : 300;   // 由半径估算质量
 const radiusFromMass = m => m < 2 ? m ** .28 : m < 130 ? .9 * m ** .59 : 11;                  // 由质量估算半径
 const kindOf = re => re < 2 ? 'rock' : re < 6 ? 'ice' : 'gas';
@@ -192,7 +191,8 @@ export function buildRealPlanets(sys, st) {   // st = genStars(sys)（恒星信�
     if (kind === 'rock') {
       atm = teq > 900 ? '无' : teq > 330 ? R.pick(['有毒', '无', '浓厚']) : teq > 150 ? R.pick(['稀薄', '浓厚', '浓厚', '宜居']) : R.pick(['无', '稀薄']);
       if (q.ocean) atm = '宜居';
-      res = teq > 900 ? '金属矿' : R.pick(rockRes);
+      res = teq > 900 ? '金属矿' : rockRes(R.rand(), temp, atm, re >= 1.25 || g >= 1.5);   // 熔岩 → 金属矿；高压 → 晶体；宜居 / 高温 → 稀土
+      if (q.ocean) res = '水冰';
       if (atm === '宜居') { const L = R.rand(); life = L < .5 ? '微生物' : L < .8 ? '植物' : '无' }
     } else if (kind === 'gas') { atm = '浓厚（氢氦）'; res = R.pick(['氢气', '氦-3', '氨']) }
     else { atm = '浓厚（氢氦）'; res = R.pick(['水冰', '甲烷冰', '氨冰']) }

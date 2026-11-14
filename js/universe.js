@@ -1,6 +1,6 @@
 // 程序化宇宙生成：星系、背景星、星云、恒星系、行星（纯函数，不依赖游戏状态）
 import * as THREE from 'three';
-import { TAU, GR, HOME_POS, ROMAN, STAR_COLS, LIFE_BONUS } from './constants.js';
+import { TAU, GR, HOME_POS, ROMAN, STAR_COLS, LIFE_BONUS, rockRes } from './constants.js';
 import { SOL, buildSolPlanets } from './real.js';
 import { sampleReal, buildRealStars, buildRealPlanets } from './realsystems.js';
 import { makeRng, lerp } from './rng.js';
@@ -102,8 +102,9 @@ function catTweak(sys, planets, ns) {
   const c = sys.cat, R = makeRng(sys.seed + 7771), n = planets.length;
   const redo = (p, i) => { p.period = Math.pow(p.dist, 1.5) * .06; p.info = genInfo(p, makeRng(sys.seed + 8881 + i), ns) };
   const fin = p => { p.info.value = valueOf(p) };
-  if (c === 'redDwarf') planets.forEach((p, i) => { if (ns === 1) p.dist -= 6; redo(p, i); p.info.temp -= 40; fin(p) });
-  else if (c === 'redGiant') planets.forEach((p, i) => { p.dist += 28; redo(p, i); p.info.temp += 170; fin(p) });
+  const reRes = (p, i) => { if (p.kind === 'rock') p.info.res = rockRes(makeRng(sys.seed + 9991 + i).rand(), p.info.temp, p.info.atm, p.radius >= 2 || p.info.g >= 1.5) };   // 环境改了之后重新定资源
+  if (c === 'redDwarf') planets.forEach((p, i) => { if (ns === 1) p.dist -= 6; redo(p, i); p.info.temp -= 40; reRes(p, i); fin(p) });
+  else if (c === 'redGiant') planets.forEach((p, i) => { p.dist += 28; redo(p, i); p.info.temp += 170; reRes(p, i); fin(p) });
   else if (c === 'hotJupiter') {
     const p = planets[0]; Object.assign(p, { kind: 'gas', radius: R.uni(4.5, 5.5), ring: false, moons: R.int(0, 1), palette: [[.2, .2, .3], [.55, .35, .45]], glow: [.9, .35, .1], glowI: .35, cat: 'hotJupiter' });
     if (ns === 1) p.dist = R.uni(19, 23);
@@ -120,7 +121,7 @@ function catTweak(sys, planets, ns) {
   } else if (c === 'superEarth') {
     for (const p of planets.slice(0, Math.min(2, n))) {
       Object.assign(p, { kind: 'rock', radius: R.uni(2.5, 3.2), ring: false, cat: 'superEarth' });
-      redo(p, p.idx); p.info.g = +R.uni(1.6, 2.6).toFixed(2); p.info.atm = R.pick(['稀薄', '浓厚', '浓厚', '宜居']); fin(p); p.info.value += 60;
+      redo(p, p.idx); p.info.g = +R.uni(1.6, 2.6).toFixed(2); p.info.atm = R.pick(['稀薄', '浓厚', '浓厚', '宜居']); reRes(p, p.idx); fin(p); p.info.value += 60;
     }
   } else if (c === 'compact') {
     const start = ns > 1 ? planets[0].dist : 16;
@@ -137,7 +138,7 @@ function genInfo(p, R, ns = 1) {
   if (p.kind === 'ice') temp -= 60;
   if (p.kind === 'rock') {
     atm = R.pick(['无', '稀薄', '浓厚', '浓厚', '有毒', '宜居', '宜居']);
-    res = R.pick(['金属矿', '稀土', '水冰', '晶体', '硅酸盐']);
+    res = rockRes(R.rand(), temp, atm, p.radius >= 2);   // 按温度、大气、大小定资源
     const hab = temp > -30 && temp < 70 && (atm === '宜居' || atm === '浓厚');
     if (hab && R.rand() < .75) { const L = R.rand(); life = L < .5 ? '微生物' : L < .8 ? '植物' : L < .95 ? '动物' : '文明遗迹' }
   } else if (p.kind === 'gas') {

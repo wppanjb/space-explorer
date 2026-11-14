@@ -67,6 +67,7 @@
       <div class="dot"></div>
     </div>
     <div id="prompt"></div>
+    <div id="nogo" class="hidden"></div>
     <div id="tutor" class="box hidden"></div>
     <div id="labels"></div>
     <div id="bmark" class="hidden"><b>◈</b><span id="bmarkTxt"></span></div>
@@ -80,6 +81,8 @@
   <div id="start" class="overlay">
     <div class="box">
       <h1>DEEP SPACE EXPLORER <span class="ver" id="ver"></span></h1>
+      <img src="assets/bg.png" alt="Deep Space Explorer" style="width:100%;max-width:800px">
+      <!-- <img src="assets/Kepler.png" alt="Kepler-62" style="height: 160px; position: relative; top: -180px; left: 400px; margin-bottom: -160px; opacity: 0.7; border: none"> -->
       <div class="kaiti-text">
         <p>在《星际开拓计划》古老的航海日志中，记载着一个关于宇宙终极密码的传说——只要集齐7块远古先驱者遗留的信号碎片，就能洞悉万物本源。</p>
         <p>
@@ -104,15 +107,52 @@
     </div>
   </div>
 
-  <!-- 结局 -->
+  <!-- 结局：成功 -->
   <div id="ending" class="overlay hidden">
     <div class="box">
-      <h1>信号解码完成</h1>
-      <p>奇点回应了你。无数星光在眼前展开——那是先驱者留下的全部星图，每一颗恒星、每一条航线都在向你敞开。</p>
-      <p>他们并没有消失，只是把这片星海托付给了下一个愿意远行的人。现在，你就是继承者。</p>
+      <h1>先驱者的讯息</h1>
+      <p>信号解码完成。奇点深处传来的不是回声，而是一段被折叠了无数年的讯息：</p>
+      <p class="kaiti-text">「欢迎你，远行者。我们没有消失，只是把自己写进了光里。七块碎片从来不是钥匙，而是种子——每一块，都记录着一颗行星上生命诞生的方式。万物的本源，就是生命本身。当你找到下一颗会呼吸的行星，请把种子带去那里。」</p>
+      <p class="end-sequel"><span>第二季</span>即将开启 · 敬请期待</p>
+      <svg class="pod-art" viewBox="0 0 200 260" aria-hidden="true">
+        <defs>
+          <radialGradient id="podG" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#9dffb8" stop-opacity=".75" /><stop offset="1" stop-color="#3fd97a" stop-opacity="0" /></radialGradient>
+          <linearGradient id="podGlass" x1="0" x2="1"><stop offset="0" stop-color="#7fd4ff" stop-opacity=".28" /><stop offset=".5" stop-color="#bff5ff" stop-opacity=".07" /><stop offset="1" stop-color="#7fd4ff" stop-opacity=".3" /></linearGradient>
+          <radialGradient id="podSeed" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#f2ffe8" /><stop offset=".6" stop-color="#7be891" /><stop offset="1" stop-color="#2fae62" /></radialGradient>
+          <clipPath id="podClip"><rect x="62" y="42" width="76" height="176" rx="38" /></clipPath>
+        </defs>
+        <circle class="pod-glow" cx="100" cy="130" r="98" fill="url(#podG)" />
+        <g transform="rotate(-14 100 130)"><ellipse class="pod-ring" cx="100" cy="130" rx="74" ry="15" fill="none" stroke="#9ff0b0" stroke-width="1.2" stroke-dasharray="3 9" opacity=".7" /></g>
+        <g transform="rotate(12 100 130)"><ellipse class="pod-ring pod-ring2" cx="100" cy="130" rx="68" ry="12" fill="none" stroke="#7fd4ff" stroke-width="1" stroke-dasharray="2 12" opacity=".6" /></g>
+        <rect x="52" y="214" width="96" height="22" rx="6" fill="#0d1526" stroke="#3a4f7a" />
+        <circle cx="68" cy="225" r="2.4" fill="#7fe0a0" class="pod-led" /><circle cx="100" cy="225" r="2.4" fill="#7fd4ff" class="pod-led pod-led2" /><circle cx="132" cy="225" r="2.4" fill="#7fe0a0" class="pod-led" />
+        <rect x="62" y="34" width="76" height="12" rx="5" fill="#0d1526" stroke="#3a4f7a" />
+        <g clip-path="url(#podClip)">
+          <rect x="62" y="42" width="76" height="176" fill="#4be58a" opacity=".16" />
+          <circle class="pod-bub" cx="84" cy="206" r="2.4" fill="#d8ffe2" /><circle class="pod-bub pod-bub2" cx="112" cy="206" r="1.8" fill="#d8ffe2" /><circle class="pod-bub pod-bub3" cx="98" cy="206" r="3" fill="#d8ffe2" /><circle class="pod-bub pod-bub4" cx="122" cy="206" r="1.5" fill="#d8ffe2" />
+          <circle cx="100" cy="130" r="30" fill="url(#podG)" class="pod-glow" />
+          <g class="pod-seed-spin"><ellipse cx="100" cy="130" rx="13" ry="19" fill="url(#podSeed)" /><path d="M100 112 C94 124 94 136 100 148" stroke="#e8ffe0" stroke-width="1.2" fill="none" opacity=".6" /></g>
+          <rect class="pod-sweep" x="66" y="42" width="7" height="176" fill="#fff" opacity=".22" /><rect class="pod-sweep pod-sweep2" x="66" y="42" width="3" height="176" fill="#fff" opacity=".14" />
+        </g>
+        <rect x="62" y="42" width="76" height="176" rx="38" fill="url(#podGlass)" stroke="#7fd4ff" stroke-opacity=".6" stroke-width="1.4" />
+        <circle class="pod-tw" cx="30" cy="70" r="1.6" fill="#d8ffe2" /><circle class="pod-tw pod-tw2" cx="172" cy="96" r="1.4" fill="#d8ffe2" /><circle class="pod-tw pod-tw3" cx="40" cy="190" r="1.3" fill="#bff5ff" /><circle class="pod-tw pod-tw4" cx="166" cy="176" r="1.8" fill="#d8ffe2" /><circle class="pod-tw pod-tw5" cx="150" cy="40" r="1.2" fill="#bff5ff" />
+      </svg>
+      <p class="end-next">货舱深处，一个小小的培育舱亮起了微光——它还在休眠，等待被唤醒。</p>
+      <p class="end-title">获得称号：<b>✦ 银心探索者</b></p>
       <p id="endStats" style="color:var(--c2)"></p>
-      <div class="row"><button id="btnEndClose">继续探索</button></div>
-      <p class="hint">银河仍然向你开放：还有大量行星、信标和升级等着你。</p>
+      <div class="row"><button id="btnEndClose">继续探索</button><button id="btnEndQuit">结束游戏</button></div>
+      <p class="hint">「继续探索」：飞船停在奇点外的安全位置，银河仍然向你开放。「结束游戏」：回到开始界面。</p>
+    </div>
+  </div>
+
+  <!-- 结局：失败 -->
+  <div id="gameover" class="overlay hidden">
+    <div class="box">
+      <canvas id="goCanvas" width="720" height="240"></canvas>
+      <h1>信号中断</h1>
+      <p>飞船越过了不可回头点，在事件视界之内消失。没有回声，只有无尽的黑暗。</p>
+      <p class="hint">知识库、军衔、信用点保留；收藏、货舱和飞船升级随飞船一起消失。</p>
+      <div class="row"><button id="btnRestart">重新开始</button></div>
     </div>
   </div>
 
@@ -183,6 +223,10 @@
             <td>瞄准行星并按住扫描（银心的奇点也要这样扫描，条件满足时才能完成）</td>
           </tr>
           <tr>
+            <td>鼠标右键 / V</td>
+            <td>范围扫描（升级扫描仪后）：把准星外圈里的几颗行星一起扫</td>
+          </tr>
+          <tr>
             <td>R</td>
             <td>对选中的目标恒星做远程探测（消耗燃料）</td>
           </tr>
@@ -216,12 +260,15 @@
         <p><b style="color:var(--c2)">星系全景图：</b>按 <b>P</b>
           可以随时拍下当前星系的全景图：已扫描的行星画成实心，没扫描的只画轨道；右上角写着主恒星的类型、温度（真实恒星还有半径、质量和距离）以及耀斑和高温区的范围，不需要再扫描恒星。扫完一个星系的全部行星时会自动拍一张。收藏夹的「星系全景」标签里可以查看，最新的在最上面，也可以按名字排；重拍会更新旧图。
         </p>
+        <p><b style="color:var(--c2)">范围扫描：</b>升级扫描仪后，准星外会多出一圈虚线圈，每升一级圈变大一点。按住 <b>鼠标右键或 V</b>，圈内、并且在扫描距离内的行星会一起被扫描；按 <b>F 或鼠标左键</b>仍然只扫准星对准的那一颗，想只要其中一颗就用它。每颗各算各的：各自的信用点、经验、采样（受货舱限制）和收藏卡片；弹出的是几张小卡片，点一张可以放大。已经扫描过的行星，以及主线任务要找的那颗行星，不参与范围扫描。升级扫描仪需要的晶体比其他升级多（2、2、3、3、5 个），晶体很稀有，要往外围的星系去找。</p>
         <p><b style="color:var(--c2)">军衔与经验：</b>首次扫描行星 +8～25（特别的类别最多），完成星系 +40（再加每颗行星 +5），拍摄星系全景 +10（每个星系第一次），拾取信标
           +8，收集碎片 +100，第一次解锁知识库条目 +15。经验够了会晋升，晋升的要求在通知里会写明。</p>
         <p><b style="color:var(--c2)">知识库：</b>按 <b>L</b>
-          打开。第一次遇到的恒星类型、行星类别、双星三星、小行星带、耀斑、真实星系等，都会收进知识库，没遇到过的不会显示；扫描银心奇点后还会解锁黑洞的介绍。</p>
+          打开。第一次遇到的恒星类型、行星类别、双星三星、小行星带、耀斑、真实星系等，都会收进知识库，没遇到过的不会显示；扫描银心奇点后还会解锁黑洞的介绍和「生命的种子」。</p>
+        <p><b style="color:var(--c2)">知识测验：</b>经验超过 <b>900</b> / <b>1500</b> / <b>3000</b> 后，每完成一个星系（等行星卡飞走、全景图和晋升都看完之后），会邀请你答一次测验：<b>5 题，每题限时 20 秒</b>，四选一，题目是从你<b>已经解锁的知识库条目</b>里随机抽的真实天文知识。三档每题分别加 <b>20 / 30 / 50</b> 经验，答对立刻加。可以选「开始答题」「先去知识库复习」或「跳过」，之后随时能在知识库顶部的「知识测验」里补答。<b>只要按了「开始」，这一档的机会就用掉了</b>（答对的已加经验，中途放弃的题不算）；之后再答都是练习，不加经验。答题开始后不能打开知识库，按 1～4（或 A～D）选答案，Enter 下一题。</p>
         <p><b style="color:var(--c2)">货舱与资源：</b>在货舱（I）里使用或出售。氢气 +15、甲烷冰 +25、氦-3 +40 燃料；金属矿修补船体 +20、硅酸盐
           +10；其余材料可出售换取信用点，或留作升级。货舱满了就采不了新样本。</p>
+        <p><b style="color:var(--c2)">资源从哪里来：</b>岩石行星的资源看环境：高温的多金属矿和硅酸盐，低温的多水冰；熔岩行星是金属矿，海洋世界是水冰。<b>稀土</b>来自有岩浆和火山活动的行星（炽热的、温暖的，以及宜居行星里少量），<b>晶体</b>只出现在超级地球等高压的大型岩石行星上，<b>非常稀少</b>，离家园近的星系里很难找到，需要往更远的星系去找，<b>氦-3</b>来自气态巨行星。想升级引擎就去找炽热或宜居的行星，升级扫描仪就去找大型岩石行星。</p>
         <p><b
             style="color:var(--c2)">升级：</b>每次升级除了信用点，还要消耗一种材料：引擎·稀土，燃料舱·水冰，扫描仪·晶体，推进器·氦-3，货舱·金属矿，等级越高需要越多。升级页面会显示当前材料是否够。
         </p>
@@ -244,7 +291,7 @@
         <p><b style="color:var(--c2)">恒星高温区：</b>离恒星约 2.6 倍半径以内是高温区，船体会持续熔毁（每秒 5～15 点，越近越快），屏幕会变红，立即远离。实习生训练期间没有这些危险。</p>
         <p><b style="color:var(--c2)">小行星带：</b>行星带里的速度要低于 12 u/s，否则会不断被撞。</p>
         <p><b style="color:var(--c2)">撞击：</b>高速撞上行星或恒星会受损。船体低于 25 时，最高速度会下降 40%。</p>
-        <p><b style="color:var(--c2)">银心奇点：</b>奇点附近有引力潮汐，会把飞船拉向中心，并让船体持续受损（越近越快）。必须靠近到 90 u 内才能扫描它，掌握好时间，扫完就撤。</p>
+        <p><b style="color:var(--c2)">银心奇点：</b>奇点附近有引力潮汐，会把飞船拉向中心，并让船体持续受损（越近越快）。必须靠近到 90 u 内才能扫描它，扫描要持续约 12 秒（升级扫描仪可缩短），期间引力会不断把你往里拖——要一边扫描一边用推进顶住（S 后退、Shift 加速），别被拖过不可回头点。扫描中途偏离或退出范围，进度会慢慢回落。<b style="color:#ff9a8a">离奇点 40 u 以内是「不可回头点」</b>：越过就无法脱离，飞船会被拖进事件视界，游戏结束（知识库、军衔、信用点保留，收藏、货舱和飞船升级归零）。接近时屏幕上会显示距离读数并发出警报。潮汐区里引力会拖慢移动，越靠近奇点，后退越吃力。</p>
         <p><b style="color:var(--c2)">船体失效：</b>船体降到 0，应急信标会把你送回家园恒星，货舱物资减半，信用点 −10%，船体恢复一半。船体低于 30% 时，屏幕边缘会持续泛红。</p>
         <p><b style="color:var(--c2)">越深越危险：</b>每收集一块信号碎片，危险事件的强度会提高约 12%。</p>
       </div>

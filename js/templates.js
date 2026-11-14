@@ -132,7 +132,11 @@ const figBH = L => svgOpen + `<defs><radialGradient id="gBd" cx=".5" cy=".5" r="
   <ellipse cx="180" cy="76" rx="120" ry="26" fill="url(#gBd)" opacity=".85"/><circle cx="180" cy="76" r="26" fill="none" stroke="#ffd9a0" stroke-opacity=".35" stroke-width="3"/><circle cx="180" cy="76" r="20" fill="#000"/>
   <path d="M60 76a120 26 0 0 1 240 0" fill="none" stroke="#ffb04a" stroke-opacity=".5" stroke-width="2"/>
   ${lab(180, 126, L.horizon, '#c9d6ee')}${lab(70, 40, L.disk, '#ffb04a')}${lab(180, 20, L.tide, '#ff9a8a')}</svg>`;
-const FIGS = { units: figUnits, star2: figStar2, star3: figStar3, cat_redDwarf: figRedDwarf, cat_redGiant: figRedGiant, cat_compact: figCompact, star_blue: figBlue, star_G: figSpec('G', '#ffd27a', 14), star_F: figSpec('F', '#fff2c8', 16), star_K: figSpec('K', '#ffae6a', 11), kind_rock: figRock, kind_gas: figGas, kind_ice: figIce, cat_hotJupiter: figHotJ, cat_lava: figLava, cat_ocean: figOcean, cat_superEarth: figSuper, belt: figBelt, ringMoon: figRing, flare: figFlare, blackhole: figBH };
+const figSeed = L => svgOpen + `<defs><radialGradient id="gSd" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#d8ffd0"/><stop offset=".45" stop-color="#6fe08a" stop-opacity=".7"/><stop offset="1" stop-color="#6fe08a" stop-opacity="0"/></radialGradient></defs>
+  <circle cx="180" cy="72" r="46" fill="url(#gSd)"/><ellipse cx="180" cy="72" rx="9" ry="12" fill="#e8ffe0"/>
+  ${[0, 1, 2, 3, 4, 5, 6].map(i => { const a = i / 7 * Math.PI * 2 - Math.PI / 2; return `<circle cx="${(180 + Math.cos(a) * 78).toFixed(1)}" cy="${(72 + Math.sin(a) * 46).toFixed(1)}" r="4" fill="#9ff0b0" opacity=".85"/>` }).join('')}
+  ${lab(180, 138, L.seed, '#bff5c8')}${lab(300, 20, L.frag, '#9ff0b0')}${lab(60, 20, L.pod, '#b8c7e0')}</svg>`;
+const FIGS = { lifeSeed: figSeed, units: figUnits, star2: figStar2, star3: figStar3, cat_redDwarf: figRedDwarf, cat_redGiant: figRedGiant, cat_compact: figCompact, star_blue: figBlue, star_G: figSpec('G', '#ffd27a', 14), star_F: figSpec('F', '#fff2c8', 16), star_K: figSpec('K', '#ffae6a', 11), kind_rock: figRock, kind_gas: figGas, kind_ice: figIce, cat_hotJupiter: figHotJ, cat_lava: figLava, cat_ocean: figOcean, cat_superEarth: figSuper, belt: figBelt, ringMoon: figRing, flare: figFlare, blackhole: figBH };
 
 // ---------- 知识介绍弹窗 ----------
 /** 双星 / 三星：带示意图的排版 */
@@ -169,8 +173,9 @@ export function knowRich(K, lib = false, sup = '') {
 export const knowDetail = K => K.sec ? knowRich(K, true) : `${K.fig ? FIGS[K.fig](T.know.figs[K.fig]) : ''}<div class="kbody"><h2>📖 ${K.title}</h2>${K.body}</div>`;
 /** 知识库面板。d = { groups: [{ name, items: [{ key, title, isNew }] }], cur, detail, count } */
 export const libHtml = d => `<div class="c-lib"><div class="c-lib-list"><div class="c-lib-count">${T.lib.title} · ${T.lib.count(d.count)}</div>` +
+  `<div class="c-lib-it c-lib-quiz${d.quiz.on ? ' on' : ''}" data-key="__quiz"><span>${T.quiz.libItem}</span>${d.quiz.badge ? `<b class="c-lib-new">${T.quiz.badge}</b>` : ''}</div>` +
   d.groups.map(g => `<h3>${g.name}</h3>` + g.items.map(i => `<div class="c-lib-it${i.key === d.cur ? ' on' : ''}" data-key="${i.key}"><span>${i.title}</span>${i.isNew ? `<b class="c-lib-new">${T.lib.newTag}</b>` : ''}</div>`).join('')).join('') +
-  `</div><div class="c-lib-detail">${d.count ? d.detail : `<p class="c-lib-empty">${T.lib.empty}</p>`}</div></div><p class="hint c-lib-hint">${T.lib.hint}</p>`;
+  `</div><div class="c-lib-detail">${d.count || d.quiz.on ? d.detail : `<p class="c-lib-empty">${T.lib.empty}</p>`}</div></div><p class="hint c-lib-hint">${T.lib.hint}</p>`;
 /** 没有示意图的简单排版 */
 export const knowPlain = K => `<h2>📖 ${K.title}</h2>${K.body}<div class="row c-mt12"><button id="knowOk">${T.ui.gotIt}</button></div><p class="hint">${T.ui.closeHint}</p>`;
 /** 第一次扫描某类行星时，叠在卡片图片下方的介绍（「知道了」按钮放在最后一段末尾） */
@@ -216,6 +221,26 @@ export const cardReward = (value, fuel) => `<span class="v">${T.cards.reward(val
 
 // ---------- 行星收藏 ----------
 export const optionHtml = (value, label) => `<option value="${value}">${label}</option>`;
+// ---------- 知识测验 ----------
+export const quizOfferHtml = d => `<h2>🎓 ${T.quiz.title} · ${T.quiz.tier(d.n)}</h2><p>${T.quiz.offer(d.count, d.sec, d.per, d.count * d.per)}</p><p class="hint">${T.quiz.offerHint}</p>
+  <div class="row c-qz-btns"><button id="qzStart">${T.quiz.start}</button><button id="qzReview">${T.quiz.review}</button><button id="qzSkip">${T.quiz.skip}</button></div>`;
+export const quizQHtml = d => `<div class="c-qz-top"><span class="c-qz-label">🎓 ${d.label}</span><span>${d.i} / ${d.n}</span><span id="qzTime" class="c-qz-time">${d.sec}</span></div>
+  <div class="c-qz-bar"><i id="qzBar"></i></div><h3 class="c-qz-q">${d.q}</h3>
+  <div class="c-qz-opts">${d.opts.map((o, i) => `<button class="c-qz-opt" data-i="${i}"><kbd>${'ABCD'[i]}</kbd>${o}</button>`).join('')}</div>
+  <div id="qzFb" class="c-qz-fb"></div><div class="row c-qz-btns"><button id="qzNext" class="hidden"></button><button id="qzQuit" class="c-qz-quit">${T.quiz.quit}</button></div>`;
+export const quizFbHtml = d => `<div class="c-qz-fb-${d.ok ? 'ok' : 'bad'}"><b>${d.timeout ? T.quiz.timeUp : d.ok ? T.quiz.right : T.quiz.wrong}</b>${d.gain ? `<em>${T.quiz.gain(d.gain)}</em>` : ''}</div>${d.ok ? '' : `<p>${T.quiz.correctIs(d.ans)}</p>`}<p class="c-qz-exp">${d.exp}</p>`;
+export const quizResultHtml = d => `<h2>🎓 ${d.quit ? T.quiz.quitTitle : d.practice ? T.quiz.practiceTitle : T.quiz.resultTitle}</h2><p class="c-qz-score">${T.quiz.score(d.right, d.n)}</p>
+  <p class="${d.gain ? 'c-qz-gain' : 'hint'}">${d.gain ? T.quiz.gained(d.gain) : d.practice ? T.quiz.noGain : ''}</p>${d.quit ? `<p class="hint">${T.quiz.quitNote}</p>` : ''}
+  <div class="row c-qz-btns"><button id="qzDone">${T.quiz.done}</button><button id="qzAgain">${T.quiz.again}</button></div>`;
+/** 知识库里的「知识测验」页：d = { xp, avail, pool, tiers: [{ n, need, per, state: 'locked' | 'ready' | 'done' }] } */
+export const quizMenuHtml = d => { const M = T.quiz.menu; return `<div class="c-qm"><h2>🎓 ${T.quiz.title}</h2><p>${M.intro}</p>
+  <p class="hint">${M.xp(d.xp)} · ${d.avail ? M.pool(d.pool, d.avail) : M.empty}</p><h4>${M.tiersHead}</h4>
+  ${d.tiers.map(t => `<div class="c-qm-row ${t.state}"><b>${M.tier(t.n)}</b><span>${M.per(t.per)}</span><i>${t.state === 'done' ? M.done : t.state === 'ready' ? '' : M.locked(t.need)}</i>${t.state === 'ready' && d.avail ? `<button data-qz="${t.n - 1}">${M.start}</button>` : ''}</div>`).join('')}
+  <p class="hint">${M.note}</p><h4>${M.practiceHead}</h4><p>${M.practiceNote}</p>${d.avail ? `<button data-qz="practice">${M.practice}</button>` : ''}</div>` };
+/** 范围扫描后的多张小卡片：items = [{ src, name, reward, isNew }] */
+export const multiHtml = items => `<h2>${T.multi.title(items.length)}</h2><p class="hint">${T.multi.hint}</p>
+  <div class="c-mc-grid">${items.map((c, i) => `<div class="c-mc${c.isNew ? ' new' : ''}" data-i="${i}"><img src="${c.src}" alt="${c.name}"><div class="c-mc-name">${c.name}</div><div class="c-mc-r">${c.reward}</div></div>`).join('')}</div>
+  <div class="row"><button id="multiOk">${T.ui.gotIt}</button></div>`;
 export const cardImgHtml = (src, alt) => `<img src="${src}" alt="${alt}">`;
 export const emptyHtml = para;
 
@@ -264,10 +289,12 @@ export function journalHtml(d) {
 }
 
 // ---------- 货舱 / 升级 ----------
+/** 通关后货舱里的培育舱（休眠中，2.0 才有玩法） */
+export const podHtml = () => `<p class="c-pod">${T.cargo.pod}</p>`;
 /** rows = [{ name, n, label（可使用时的按钮文字，否则 null）, disabled, price }] */
 export const cargoHtml = rows => rows.length ? '<table>' + rows.map(r =>
   `<tr><td>${r.name}</td><td>×${r.n}</td><td>${r.label ? `<button data-u="${r.name}" ${r.disabled ? 'disabled' : ''}>${r.label}</button>` : `<span class="c-dim">${T.cargo.sellOnly}</span>`}</td>
-      <td><button data-r="${r.name}">${T.cargo.sell(r.price)}</button></td></tr>`).join('') + '</table>' : para(T.cargo.empty);
+      <td><button data-r="${r.name}">${T.cargo.sell(r.price)}</button>${r.n > 1 ? ` <button data-ra="${r.name}">${T.cargo.sellAll(r.n, r.price)}</button>` : ''}</td></tr>`).join('') + '</table>' : para(T.cargo.empty);
 /** rows = [{ k, name, level, max, descNow, descNext, mat, have, need, cargoFull, can, cost }] */
 export const upgHtml = rows => '<table>' + rows.map(r =>
   `<tr><td>${r.name}</td><td class="pips">${'■'.repeat(r.level) + '□'.repeat(5 - r.level)}</td><td>${r.descNow}${r.max ? '' : ` → ${r.descNext}`}</td>

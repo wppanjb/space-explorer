@@ -14,6 +14,7 @@ import { beep } from './audio.js';
 import { soft, disc, planetTexture, pointCloud } from './graphics.js';
 import { drawPlanetCard, drawSysPanorama } from './cards.js';
 import { T } from './text.js';
+import { BANK } from './quizbank.js';
 import * as H from './templates.js';
 
 
@@ -23,7 +24,12 @@ const $ = id => document.getElementById(id);
 // 存档 & 状态
 // =====================================================================
 const params = new URLSearchParams(location.search);
-function loadSave() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)) } catch { return null } }
+// 测试结局用：?end=fall 把飞船放在离奇点 100 u 处、朝向奇点（往前飞就会越过不可回头点）；?end=scan 放在 80 u 处，可以直接扫描奇点。
+// 测试模式用的是一份临时存档：不读也不写真实存档（可以和 ?seed= 一起用）。
+const TEST_END = params.get('end');
+const testSave = () => ({ seed: parseInt(params.get('seed')) || 42, credits: 3000, up: {}, hull: 100, cargo: { '金属矿': 3, '水冰': 2 }, sampled: [], discovered: [], beacons: [], visited: [0], probed: [], ended: false,
+  frags: 7, playTime: 1, xp: 4000, xpv: 2, panos: {}, rankSeen: 5, done: [0], fuel: 100, pos: [0, 0, TEST_END === 'scan' ? 80 : 100], quat: [0, 0, 0, 1] });
+function loadSave() { if (TEST_END) return testSave(); try { return JSON.parse(localStorage.getItem(SAVE_KEY)) } catch { return null } }
 let save = loadSave();
 const urlSeed = parseInt(params.get('seed'));
 if (urlSeed && save && save.seed !== urlSeed) save = null;
@@ -46,6 +52,9 @@ const visited = new Set(save?.visited || []);
 for (const id of [...discovered]) { const [si, pi] = id.split(':').map(Number); const sy = systems[si]; if (!sy || !(pi < genPlanets(sy).length)) discovered.delete(id) }   // 旧存档里已不存在的行星（比如以前补的推测行星）直接去掉
 const probed = new Set(save?.probed || []);
 let bhDone = !!save?.ended;
+let secret = !!save?.secret;   // 扫描奇点后得知「生命的秘密」（称号、培育舱伏笔）
+const xpSeen = new Set(save?.xpSeen ?? (save?.discovered || []));   // 已给过首次扫描经验的行星：失败后收藏归零、重新扫描不再给经验
+const panoGiven = new Set((save?.panoGiven ?? Object.keys(save?.panos || {})).map(String));   // 已给过全景奖励的星系
 let frags = Math.min(FRAG_N, save?.frags ?? 0), playTime = save?.playTime ?? 0;
 // ===== 军衔与经验 =====
 const RANK_QUESTS = [0, 1, 2, 4, 7, 7];   // 各军衔已解锁的主线数量
@@ -72,6 +81,9 @@ function addXp(n) { xp += n }
 const sysGain = s => s.i === 0 ? 80 : 40 + 5 * genPlanets(s).filter(p => !p.home).length;   // 完成星系：固定 40 + 每颗行星 5（不随军衔增长）；太阳系训练固定 80
 const maxSpeed = () => (30 + 10 * up.engine) * (hull < 25 ? .6 : 1), fuelMax = () => 100 + 40 * up.tank,
   scanRange = () => 90 + 30 * up.scanner, scanTime = () => Math.max(1, 3 - .4 * up.scanner), energyMax = () => 100 + 30 * up.boost;
+const AIM_TOL = .035;                               // 单颗扫描（F / 左键）的瞄准容差（弧度）：行星要对准准星
+const multiTol = () => AIM_TOL + .03 * up.scanner;  // 范围扫描圈的半径（弧度）：扫描仪每升一级，圈变大一点
+const MULTI_KEY = 'KeyV';                          // 范围扫描的键（另有鼠标右键）；想换键只改这里（G 是曲速，不能用）
 let fuel = Math.min(save?.fuel ?? fuelMax(), fuelMax()), energy = energyMax();
 const HULL_MAX = 100; let hull = Math.min(save?.hull ?? HULL_MAX, HULL_MAX);
 const cargo = save?.cargo || {};                 // 货舱：{ 资源名: 数量 }
@@ -79,10 +91,11 @@ const sampled = new Set(save?.sampled || []);    // 已采样的行星 id（每�
 const cargoMax = () => 20 + 10 * up.cargo, cargoUsed = () => Object.values(cargo).reduce((a, b) => a + b, 0);
 
 function doSave() {
+  if (TEST_END) return;   // 测试结局模式不写存档
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
-      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
+      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, secret, quiz, xpSeen: [...xpSeen], panoGiven: [...panoGiven], frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
 }
@@ -388,15 +401,19 @@ function updateLOD() {
 // 输入
 // =====================================================================
 const keys = {}; let mouseDX = 0, mouseDY = 0, mouseHeld = false, running = false, openP = null;
-const panels = { journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), cards: $('cards'), cargo: $('cargo'), help: $('help'), know: $('know'), lib: $('know') };   // 知识库和弹窗共用同一个浮层
-const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'cards' || openP === 'cargo' || openP === 'help' || openP === 'know' || openP === 'lib' || cardHold;
+$('know').parentElement.insertAdjacentHTML('beforeend', '<div id="multi" class="overlay hidden"><div class="box c-multi"></div></div>');   // 范围扫描的多张小卡片面板（用代码插入，不需要改 index.html）
+$('know').parentElement.insertAdjacentHTML('beforeend', '<div id="quiz" class="overlay hidden"><div class="box c-quiz"></div></div>');   // 知识测验的邀请 / 答题 / 结果面板（用代码插入，不需要改 index.html）
+$('reticle').querySelector('svg').insertAdjacentHTML('beforeend', '<circle id="ring2" class="c-ring2" cx="40" cy="40" r="26" />');   // 范围扫描圈（扫描仪升级后才显示）
+const panels = { quiz: $('quiz'), multi: $('multi'), journal: $('journal'), upg: $('upg'), map: $('mapw'), ending: $('ending'), gameover: $('gameover'), cards: $('cards'), cargo: $('cargo'), help: $('help'), know: $('know'), lib: $('know') };   // 知识库和弹窗共用同一个浮层
+const paused = () => !running || openP === 'journal' || openP === 'upg' || openP === 'ending' || openP === 'gameover' || openP === 'cards' || openP === 'cargo' || openP === 'help' || openP === 'know' || openP === 'lib' || openP === 'multi' || openP === 'quiz' || cardHold;
 addEventListener('keydown', e => {
   if (!running) return;
+  if (openP === 'quiz') { e.preventDefault(); if (!e.repeat) quizKey(e); return }   // 测验：只响应测验自己的按键（开始后不能打开知识库等任何面板）
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (!$('cardbig').classList.contains('hidden') && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) { showBig(bigI + (e.code === 'ArrowLeft' ? -1 : 1)); return }
-  if (e.repeat) return;
+  if (e.repeat || openP === 'gameover') return;
   if (cardHold && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' || e.code === 'Escape')) { dismissCard(); return }
-  if (openP === 'know' && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) { closePanel(); return }
+  if ((openP === 'know' || openP === 'multi') && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) { closePanel(); return }
   keys[e.code] = true; did[e.code] = true; if (e.code === 'NumpadEnter') did.Enter = true;
   if (e.code === 'Escape') { if (!$('cardbig').classList.contains('hidden')) { $('cardbig').classList.add('hidden'); return } if (openP) closePanel(); return };
   if (e.code === 'KeyB') toggleBloom();
@@ -418,8 +435,10 @@ addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseHel
 document.addEventListener('mousemove', e => {
   if (document.pointerLockElement === renderer.domElement) { mouseDX += e.movementX; mouseDY += e.movementY }
 });
-addEventListener('mousedown', e => { if (e.button === 0 && document.pointerLockElement === renderer.domElement) mouseHeld = true });
-addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false });
+let mouseRight = false, multiOn = false;   // 鼠标右键按住 / 此刻是否在范围扫描
+addEventListener('mousedown', e => { if (document.pointerLockElement !== renderer.domElement) return; if (e.button === 0) mouseHeld = true; if (e.button === 2) mouseRight = true });
+addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false; if (e.button === 2) mouseRight = false });
+addEventListener('contextmenu', e => { if (document.pointerLockElement === renderer.domElement) e.preventDefault() });
 renderer.domElement.addEventListener('click', () => {
   if (running && !paused() && !openP && document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock?.()
 });
@@ -465,10 +484,11 @@ function renderLib() {
   const box = $('know').firstElementChild; box.classList.remove('rich'); box.classList.add('lib');
   const groups = T.lib.groups.map(g => ({ name: g.name, items: g.keys.filter(k => libSet.has(k)).map(k => ({ key: k, title: KNOW[k].title, isNew: !libSeen.has(k) })) })).filter(g => g.items.length);
   const all = groups.flatMap(g => g.items);
-  if (!all.some(i => i.key === libCur)) libCur = (all.find(i => i.isNew) || all[0])?.key ?? null;
+  if (libCur !== '__quiz' && !all.some(i => i.key === libCur)) libCur = (all.find(i => i.isNew) || all[0])?.key ?? null;
   if (libCur && !libSeen.has(libCur)) { libSeen.add(libCur); saveLib() }   // 打开的那条不再算「新」
-  box.innerHTML = H.libHtml({ groups: groups.map(g => ({ ...g, items: g.items.map(i => ({ ...i, isNew: i.isNew && i.key !== libCur })) })), cur: libCur, count: all.length, detail: libCur ? H.knowDetail(knowOf(libCur)) : '' });
+  box.innerHTML = H.libHtml({ groups: groups.map(g => ({ ...g, items: g.items.map(i => ({ ...i, isNew: i.isNew && i.key !== libCur })) })), cur: libCur, count: all.length, quiz: { badge: QUIZ_TIERS.some((_, i) => tierReady(i)) && quizAvail() > 0, on: libCur === '__quiz' }, detail: libCur === '__quiz' ? renderQuizMenu() : libCur ? H.knowDetail(knowOf(libCur)) : '' });
   box.querySelectorAll('.c-lib-it').forEach(el => el.onclick = () => { libCur = el.dataset.key; renderLib() });
+  box.querySelectorAll('[data-qz]').forEach(b => b.onclick = () => startQuiz(b.dataset.qz === 'practice' ? null : +b.dataset.qz));   // 知识库里补答 / 练习
 }
 function know(key, delay = 0) {
   if (!KNOW[key] || knowSeen.has(key) || knowQ.includes(key)) return;
@@ -500,6 +520,7 @@ function knowTry() {
   if (knowQ.length) setTimeout(knowTry, 1000);
 }
 function openPanel(n) {
+  if (qzLocked() && n !== 'quiz') return;   // 答题进行中，不能打开别的面板
   if (openP === n) { closePanel(); return }
   closePanel(); openP = n; panels[n].classList.remove('hidden');
   document.exitPointerLock?.(); mouseHeld = false;
@@ -509,7 +530,7 @@ function openPanel(n) {
   if (n === 'upg') renderUpg(); if (n === 'cargo') renderCargo();
 }
 let afterKnow = null;   // 关掉某个知识弹窗之后接着要做的事（扫描奇点：先看介绍，再进结局）
-function closePanel() { const was = openP; if (openP) { panels[openP].classList.add('hidden'); openP = null } if (was === 'know' && afterKnow) { const f = afterKnow; afterKnow = null; setTimeout(f, 250) } }
+function closePanel() { if (openP === 'gameover' || (openP === 'quiz' && qzLocked())) return; const was = openP; if (openP) { panels[openP].classList.add('hidden'); openP = null } if ((was === 'know' || was === 'multi') && afterKnow) { const f = afterKnow; afterKnow = null; setTimeout(f, 250) } }
 
 // Toast & 卡片
 function toast(msg, cls = '') {
@@ -558,12 +579,12 @@ function starInfoLines(sys, st) {   // 全景图右上角的主恒星资料（�
 function starTypeText(s) { return s.rid ? byId(s.rid).star.type + ' 型恒星' : s.cat === 'redGiant' ? T.sys.redGiant : T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] }
 function shootPano(si = curSysI, auto = false) {   // auto：扫完全部行星时自动拍一张（不闪白屏）
   if (si < 0) { toast(T.pano.noSys, 'warn'); return }
-  const sys = systems[si], pl = genPlanets(sys), first = !panos[sys.i];
+  const sys = systems[si], pl = genPlanets(sys), first = !panoGiven.has(String(sys.i));
   panos[sys.i] = { t: Date.now(), ids: pl.filter(p => p.home || discovered.has(p.id)).map(p => p.id) };
   const done = pl.filter(p => !p.home && discovered.has(p.id)).length, tot = pl.filter(p => !p.home).length;
-  if (first) addXp(XP.pano);
+  if (first) { addXp(XP.pano); panoGiven.add(String(sys.i)) }
   toast(auto ? T.pano.auto(sys.name, first ? XP.pano : 0) : T.pano.shot(sys.name, done, tot, first ? XP.pano : 0), 'good'); beep(1200, .06, 'square', .04); beep(800, .1, 'square', .04, .07);
-  const n = Object.keys(panos).length, mile = first && PANO_MILE[n];
+  const n = panoGiven.size, mile = first && PANO_MILE[n];
   if (mile) { credits += mile; setTimeout(() => toast(T.pano.mile(n, mile), 'good'), 1600) }
   if (!auto) { const fl = document.createElement('div'); fl.style.cssText = 'position:fixed;inset:0;background:#fff;opacity:.7;pointer-events:none;z-index:50;transition:opacity .5s'; document.body.appendChild(fl);
   requestAnimationFrame(() => { fl.style.opacity = 0; setTimeout(() => fl.remove(), 600) }) }
@@ -663,6 +684,7 @@ function dismissCard() {
   if (!cardHold) return; cardHold = false;
   cardAnim.currentTime = 250 + cardHoldMs;   // 跳到动画的"飞走"那一段
   cardTimer = setTimeout(() => $('card').classList.add('hidden'), 750);
+  if (noteQ.length) setTimeout(nextNote, 900);   // 范围扫描里还有没看过的介绍，接着弹
 }
 $('card').addEventListener('click', e => { if (e.target.id === 'cardOk') dismissCard() });
 
@@ -784,7 +806,10 @@ function collectFragment(keep = false) {
   setQuestTarget(); doSave();
 }
 function showEnding() {
-  bhDone = true; credits += 5000; addXp(XP.bh); knowSeen.add('blackhole'); unlock('blackhole', true);   // 扫描奇点之后才解锁黑洞的介绍
+  bhDone = true; secret = true; credits += 5000; addXp(XP.bh); knowSeen.add('blackhole'); knowSeen.add('lifeSeed'); unlock('blackhole', true); unlock('lifeSeed', true);   // 扫描奇点之后才解锁黑洞的介绍和「生命的种子」
+  { const dir = ship.pos.clone().sub(bh.position); if (dir.lengthSq() < 1) dir.set(1, 0, 0); dir.normalize();   // 把飞船挪到潮汐区外的安全位置：「继续探索」和「结束游戏」之后的存档都从这里出发
+    ship.pos.copy(bh.position).addScaledVector(dir, TIDE_R + 60); ship.vel.set(0, 0, 0);
+    ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(ship.pos, bh.position, UP)); tideDepth = 0; inTide = false; $('nogo').classList.add('hidden') }
   const m = Math.floor(playTime / 60), s = Math.floor(playTime % 60);
   $('endStats').innerHTML = T.ending.stats(m, s, visited.size, systems.length, discovered.size, beaconsGot.size);
   [392, 523, 659, 784, 1047].forEach((f, i) => beep(f, .5, 'triangle', .06, i * .18));
@@ -803,7 +828,8 @@ const USE = {
   金属矿: { label: T.use.金属矿, hull: 20 }, 硅酸盐: { label: T.use.硅酸盐, hull: 10 },
 };
 const UPG_MAT = { engine: '稀土', tank: '水冰', scanner: '晶体', boost: '氦-3', cargo: '金属矿' };
-const matNeed = k => Math.ceil((up[k] + 1) / 2);
+const SCANNER_CRYSTAL = [2, 2, 3, 3, 5];   // 扫描仪每次升级需要的晶体（晶体稀有，要往外围找）
+const matNeed = k => k === 'scanner' ? (SCANNER_CRYSTAL[up.scanner] ?? 0) : Math.ceil((up[k] + 1) / 2);
 function hit(v) {
   if (rank() < 1) return;   // 实习生没有危险
   const d = Math.max(0, v - 15) * .6; if (d < 1) return;
@@ -936,13 +962,17 @@ function hurt(d, why) {
   if (d < 1) return;
   hull = Math.max(0, hull - d); toast(T.toast.hurt(why, d.toFixed(0), hull.toFixed(0), HULL_MAX), 'warn'); beep(90, .25, 'sawtooth', .08);
 }
-function wreck() {
+function homeSpot() {   // 家园恒星外 100 u、离其他恒星系最远的一点（船体失效 / 失败重来时的出生点）
   const h = systems[0]; let best = null, bm = -1e9;
   for (let a = 0; a < 360; a += 30) {
     const r = a * Math.PI / 180, p = new THREE.Vector3(Math.sin(r) * 100, 20, Math.cos(r) * 100).add(h.pos); let o = 1e9;
     for (const s of systems) if (s !== h) o = Math.min(o, s.pos.distanceTo(p));
     if (o > bm) { bm = o; best = p }
   }
+  return best;
+}
+function wreck() {
+  const h = systems[0], best = homeSpot();
   ship.pos.copy(best); ship.vel.set(0, 0, 0); ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(best, h.pos, UP)); warp = null;
   for (const k of Object.keys(cargo)) { cargo[k] = Math.floor(cargo[k] / 2); if (cargo[k] <= 0) delete cargo[k] }
   credits = Math.round(credits * .9); hull = HULL_MAX * .5; fuel = Math.max(fuel, 30); flare = null; inBelt = false;
@@ -950,6 +980,8 @@ function wreck() {
   toast(T.toast.wreck, 'warn'); beep(110, .6, 'sawtooth', .07); doSave();
 }
 // ---- 奇点潮汐 + 红屏 ----
+const FALL_R = 40, NOGO_SHOW = 110;       // 不可回头点半径（越过就无法脱离）/ 开始显示距离读数的半径
+let falling = null, alarmCd = 0;
 const TIDE_R = 160;                      // 潮汐区半径：进入后被拉向奇点、船体持续受损
 let tideDepth = 0, inTide = false;       // 0（区外）~ 1（奇点中心）
 function tide(dt) {
@@ -957,10 +989,56 @@ function tide(dt) {
   tideDepth = d < TIDE_R ? 1 - d / TIDE_R : 0;
   if (tideDepth > 0) {
     tV.copy(bh.position).sub(ship.pos).normalize();
-    ship.pos.addScaledVector(tV, 20 * tideDepth * tideDepth * dt);        // 拉力：越近越强
+    ship.pos.addScaledVector(tV, 30 * tideDepth * tideDepth * dt);        // 拉力：越近越强（不推进的话扫描到一半就会被拖过不可回头点）
     hull = Math.max(0, hull - (1.5 + 5 * tideDepth * tideDepth) * dt);    // 船体持续受损
     if (!inTide) { inTide = true; toast(T.toast.tideEnter(BH_T.range), 'warn'); beep(100, .4, 'sawtooth', .06) }
   } else if (inTide && d > TIDE_R * 1.05) inTide = false;
+  // 不可回头点：第二段警告 = HUD 距离读数 + 越近越急的警报；越过就无法脱离
+  const nogo = $('nogo');
+  if (d < NOGO_SHOW) {
+    const k = Math.max(0, (d - FALL_R) / (NOGO_SHOW - FALL_R));
+    nogo.classList.remove('hidden'); nogo.textContent = T.toast.nogoDist(Math.max(0, d - FALL_R).toFixed(0));
+    alarmCd -= dt; if (alarmCd <= 0) { beep(330 + 300 * (1 - k), .1, 'square', .05); alarmCd = .2 + 1.3 * k }
+  } else nogo.classList.add('hidden');
+  if (d < FALL_R) startFall();
+}
+function startFall() {
+  if (falling) return;
+  falling = { t: 0 }; scanT = 0; mouseHeld = false; flare = null; target = null;
+  $('nogo').classList.remove('hidden'); $('nogo').textContent = T.toast.nogoLost;
+  toast(T.toast.fallStart, 'warn'); beep(70, 1.2, 'sawtooth', .08);
+}
+function fallTick(dt) {   // 第三段：屏幕扭曲、船体异响，几秒后进入失败画面
+  falling.t += dt; const t = falling.t, d = ship.pos.distanceTo(bh.position), cv = renderer.domElement.style;
+  tideDepth = 1 - Math.min(d, TIDE_R) / TIDE_R;
+  cv.opacity = Math.max(0, Math.min(1, (d - 5.8) / 8)).toFixed(3);   // 黑洞越来越大，最后一段画面渐渐变黑，全黑之后才出失败画面
+  cv.filter = `blur(${(Math.min(t, 9) ** 2 * .1).toFixed(2)}px) hue-rotate(${Math.round(t * 20)}deg)`; cv.transform = `scale(${(1 + t * .025).toFixed(3)})`;
+  alarmCd -= dt; if (alarmCd <= 0) { beep(55 + Math.random() * 50, .28, 'sawtooth', .07); alarmCd = .3 }
+  if (t > 16 || d < 5.8) showFail();
+}
+function drawFailArt() {   // 无尽的黑暗里，一艘小飞船静静漂浮，远处只剩一道微弱的吸积盘余光
+  const cv = $('goCanvas'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  let s = 7; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(200,215,255,${.05 + rnd() * .22})`; g.fillRect(rnd() * W, rnd() * H, 1 + (rnd() < .1), 1) }
+  const gl = g.createRadialGradient(W * .8, H * .55, 3, W * .8, H * .55, 110); gl.addColorStop(0, 'rgba(255,150,60,.4)'); gl.addColorStop(.45, 'rgba(255,90,40,.1)'); gl.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gl; g.fillRect(0, 0, W, H);
+  g.save(); g.translate(W * .38, H * .5); g.rotate(-.35);   // 飞船剪影
+  g.fillStyle = '#0b0f1a'; g.strokeStyle = 'rgba(160,190,255,.55)'; g.lineWidth = 1.4;
+  g.beginPath(); g.moveTo(34, 0); g.lineTo(-10, -13); g.lineTo(-22, -26); g.lineTo(-24, -8); g.lineTo(-30, 0); g.lineTo(-24, 8); g.lineTo(-22, 26); g.lineTo(-10, 13); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = 'rgba(127,212,255,.7)'; g.beginPath(); g.ellipse(8, 0, 7, 3, 0, 0, 7); g.fill();   // 驾驶舱的一点微光
+  g.restore();
+}
+function showFail() {   // 失败：知识库、军衔、信用点保留；收藏、货舱和飞船升级随飞船一起消失
+  falling = null; const cv = renderer.domElement.style; cv.filter = cv.transform = cv.opacity = ''; $('nogo').classList.add('hidden');
+  for (const k of Object.keys(cargo)) delete cargo[k];
+  for (const k of Object.keys(up)) up[k] = 0;   // 飞船升级也随飞船一起消失
+  discovered.clear(); sampled.clear(); for (const k of Object.keys(panos)) delete panos[k]; cardCache.clear();
+  hull = HULL_MAX; fuel = fuelMax(); energy = energyMax(); flare = null; inBelt = false; tideDepth = 0; inTide = false; scanT = 0; target = null;
+  const best = homeSpot(), h = systems[0];
+  ship.pos.copy(best); ship.vel.set(0, 0, 0); ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(best, h.pos, UP)); warp = null;
+  doSave(); drawFailArt(); $('redfx').style.opacity = 0;
+  openPanel('gameover'); beep(80, 1.4, 'sine', .06);
 }
 let hullWarned = false;
 function hullWarn() {
@@ -972,6 +1050,7 @@ function redFx() {
   if (meltDepth > 0) a = Math.max(a, .3 + .5 * meltDepth + .1 * Math.sin(t * 12));   // 熔毁区：越近越红
   if (flare) a = Math.max(a, .35 + .35 * Math.sin(t * 9));                         // 耀斑预警：快速脉冲
   if (hull < HULL_MAX * .3) a = Math.max(a, .25 + .15 * Math.sin(t * 5));          // 船体危急：常亮 + 心跳
+  if (falling) a = Math.max(a, .55 + .4 * Math.sin(t * 14));
   if (tideDepth > 0) a = Math.max(a, tideDepth * (.5 + .4 * Math.sin(t * (4 + 6 * tideDepth))));   // 潮汐：越近越亮越快
   $('redfx').style.opacity = Math.max(0, a).toFixed(2);
 }
@@ -981,6 +1060,90 @@ function welcomeTick() {   // 第一个移动教学完成（或教学已关闭�
   welcomed = true;
   toast(T.rank.welcome(systems[0].name), 'good');
 }
+
+// =====================================================================
+// 知识测验：完成星系后，经验够了就邀请答题（真实天文知识，题目从已解锁的知识库条目里抽）
+// =====================================================================
+const QUIZ_TIERS = [{ xp: 900, per: 20 }, { xp: 1500, per: 30 }, { xp: 3000, per: 50 }];   // 经验超过 xp 后，完成一个星系时弹出邀请；答对一题加 per 经验
+const QUIZ_N = 5, QUIZ_SEC = 20;                                                          // 每次 5 题，每题限时 20 秒
+const quiz = { offered: [...(save?.quiz?.offered || [])], used: [...(save?.quiz?.used || [])] };   // offered：邀请弹过的档位；used：已经按过「开始」的档位（只有第一次能加经验）
+let quizCheck = false, qz = null;   // quizCheck：刚完成一个星系，等界面都空了再检查；qz：当前的一次答题
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] } return a };
+const quizPool = () => [...libSet].filter(k => BANK[k]);                                  // 已解锁、并且有题的条目
+const quizAvail = () => quizPool().reduce((n, k) => n + BANK[k].length, 0);
+const qzLocked = () => !!(qz && qz.started && !qz.done);                                  // 答题进行中：锁住所有其他面板和按键
+const tierReady = t => xp > QUIZ_TIERS[t].xp && !quiz.used.includes(t);                   // 经验够了、还没答过
+function quizTick() {   // 每帧检查：刚完成星系 → 等晋升、收藏、全景图、卡片都收完之后，按经验弹出邀请
+  if (!quizCheck || !running || openP || cardHold || collectPending || warp || rankTarget() > rankSeen || !$('card').classList.contains('hidden') || !$('cardbig').classList.contains('hidden')) return;
+  quizCheck = false;
+  const t = QUIZ_TIERS.findIndex((_, i) => !quiz.offered.includes(i) && tierReady(i));
+  if (t < 0 || !quizAvail()) return;
+  quiz.offered.push(t); doSave(); showQuizOffer(t);
+}
+function drawQuiz() {   // 抽 5 题：尽量每个条目一题，不够再从同一批条目里补
+  const keys = shuffle(quizPool()), qs = [];
+  for (const k of keys) { if (qs.length >= QUIZ_N) break; qs.push([k, BANK[k][Math.floor(Math.random() * BANK[k].length)]]) }
+  if (qs.length < QUIZ_N) { const rest = shuffle(keys.flatMap(k => BANK[k].map(q => [k, q])).filter(x => !qs.some(y => y[1] === x[1]))); while (qs.length < QUIZ_N && rest.length) qs.push(rest.pop()) }
+  return qs.map(([key, q]) => { const opts = shuffle([q[1], q[2], q[3], q[4]]); return { key, q: q[0], opts, ans: opts.indexOf(q[1]), exp: q[5] } });
+}
+function showQuizOffer(t) {
+  qz = { tier: t, started: false, done: false };
+  $('quiz').firstElementChild.innerHTML = H.quizOfferHtml({ n: t + 1, per: QUIZ_TIERS[t].per, count: Math.min(QUIZ_N, quizAvail()), sec: QUIZ_SEC });
+  $('qzStart').onclick = () => startQuiz(t);
+  $('qzReview').onclick = () => { closePanel(); libCur = '__quiz'; openPanel('lib') };   // 去知识库复习；测验一直等着，知识库里随时可以开始
+  $('qzSkip').onclick = () => closePanel();
+  openPanel('quiz'); [660, 880].forEach((f, i) => beep(f, .15, 'triangle', .05, i * .1));
+}
+function startQuiz(t) {   // t：档位序号；null 或已经答过的档位 = 练习（不加经验）
+  const tier = t != null && !quiz.used.includes(t) ? t : null, qs = drawQuiz();
+  if (!qs.length) { toast(T.quiz.noPool, 'warn'); return }
+  if (tier != null) { quiz.used.push(tier); if (!quiz.offered.includes(tier)) quiz.offered.push(tier); doSave() }   // 按下「开始」就用掉这一档的机会：之后再答都是练习
+  qz = { tier, per: tier != null ? QUIZ_TIERS[tier].per : 0, qs, i: 0, right: 0, gain: 0, started: true, done: false, answered: false, timer: 0, deadline: 0 };
+  if (openP !== 'quiz') openPanel('quiz');
+  showQuizQ();
+}
+function showQuizQ() {
+  const q = qz.qs[qz.i], box = $('quiz').firstElementChild; qz.answered = false; qz.deadline = Date.now() + QUIZ_SEC * 1000;
+  box.innerHTML = H.quizQHtml({ label: qz.per ? T.quiz.tierLabel(qz.tier + 1, qz.per) : T.quiz.practiceLabel, i: qz.i + 1, n: qz.qs.length, q: q.q, opts: q.opts, sec: QUIZ_SEC });
+  box.querySelectorAll('.c-qz-opt').forEach(b => b.onclick = () => { b.blur(); answerQuiz(+b.dataset.i) });
+  $('qzQuit').onclick = () => finishQuiz(true);
+  clearInterval(qz.timer); qz.timer = setInterval(quizTimer, 100);
+}
+function quizTimer() {
+  if (!qz || qz.answered || qz.done || openP !== 'quiz') return;
+  const left = (qz.deadline - Date.now()) / 1000;
+  $('qzBar').style.width = Math.max(0, left / QUIZ_SEC * 100) + '%'; $('qzTime').textContent = Math.max(0, Math.ceil(left)); $('qzBar').classList.toggle('low', left < 6);
+  if (left <= 0) answerQuiz(-1);   // 超时算答错
+}
+function answerQuiz(i) {
+  if (!qz || qz.answered || qz.done) return;
+  qz.answered = true; clearInterval(qz.timer);
+  const q = qz.qs[qz.i], ok = i === q.ans, last = qz.i + 1 >= qz.qs.length;
+  if (ok) { qz.right++; if (qz.per) { qz.gain += qz.per; addXp(qz.per); doSave() } beep(880, .1, 'triangle', .06); beep(1320, .14, 'triangle', .06, .09) } else beep(180, .3, 'sawtooth', .05);   // 答对立刻加经验并存档
+  $('quiz').querySelectorAll('.c-qz-opt').forEach((b, k) => { b.disabled = true; b.classList.toggle('ok', k === q.ans); b.classList.toggle('bad', k === i && !ok) });
+  $('qzFb').innerHTML = H.quizFbHtml({ ok, timeout: i < 0, ans: q.opts[q.ans], exp: q.exp, gain: ok ? qz.per : 0 });
+  $('qzBar').parentElement.classList.add('hidden');
+  const nx = $('qzNext'); nx.textContent = last ? T.quiz.seeResult : T.quiz.next; nx.classList.remove('hidden'); nx.onclick = () => nextQuiz();
+}
+function nextQuiz() { if (!qz || !qz.answered || qz.done) return; qz.i++; if (qz.i >= qz.qs.length) finishQuiz(false); else showQuizQ() }
+function finishQuiz(quit) {   // quit：中途放弃（答对的已经加了经验，没答的不算）
+  if (!qz || qz.done) return; qz.done = true; clearInterval(qz.timer);
+  $('quiz').firstElementChild.innerHTML = H.quizResultHtml({ quit, right: qz.right, n: qz.qs.length, gain: qz.gain, practice: !qz.per, answered: qz.i + (qz.answered ? 1 : 0) });
+  $('qzDone').onclick = () => closePanel();
+  $('qzAgain').onclick = () => startQuiz(null);
+  if (qz.gain) [660, 880, 1100].forEach((f, i) => beep(f, .15, 'triangle', .05, i * .08));
+}
+function quizKey(e) {   // 测验面板打开时的按键：1～4 / A～D 选答案，Enter / 空格 下一步
+  if (!qz) return; const k = e.code, go = k === 'Enter' || k === 'NumpadEnter' || k === 'Space';
+  if (!qz.started) { if (go) $('qzStart')?.click(); else if (k === 'Escape') closePanel(); return }
+  if (qz.done) { if (go || k === 'Escape') closePanel(); return }
+  if (!qz.answered) { const m = /^(?:Digit|Numpad)([1-4])$/.exec(k), a = /^Key([A-D])$/.exec(k); const i = m ? +m[1] - 1 : a ? 'ABCD'.indexOf(a[1]) : -1; if (i >= 0) answerQuiz(i); return }
+  if (go) nextQuiz();
+}
+function renderQuizMenu() {   // 知识库里的「知识测验」页：待答的档位、练习
+  return H.quizMenuHtml({ xp, avail: quizAvail(), pool: quizPool().length, tiers: QUIZ_TIERS.map((t, i) => ({ n: i + 1, need: t.xp, per: t.per, state: quiz.used.includes(i) ? 'done' : tierReady(i) ? 'ready' : 'locked' })) });
+}
+
 function promoTick() {   // 每帧检查：经验够了就弹出晋升（等收藏、卡片、其他面板都关了之后）
   if (!running || rankTarget() <= rankSeen || openP || cardHold || collectPending || !$('card').classList.contains('hidden')) return;
   rankSeen++;
@@ -1000,6 +1163,7 @@ function demote() {   // 被强制送回家园：降一级（最低初级），�
 function hazards(dt) {
   if (rank() < 1) { tideDepth = 0; flare = null; inBelt = false; meltDepth = 0; return }   // 实习生：没有危险
   if (warp) { tideDepth = 0; meltDepth = 0; return }
+  if (falling) { fallTick(dt); return }
   if (hull <= 0) { wreck(); return }
   tide(dt);
   let near = null;
@@ -1035,7 +1199,7 @@ function hazards(dt) {
 const STAR_CLASS = ['G', 'F', 'K', 'A', 'M'];
 const STAR_TEMP = { G: 5700, F: 6600, K: 4600, A: 8500, M: 3200, RG: 4000 };   // 游戏里生成的恒星：各类型的典型温度（设定值）
 const starClassOf = s => s.rid ? byId(s.rid).star.type[0] : s.cat === 'redGiant' ? 'RG' : STAR_CLASS[Math.max(0, STAR_COLS.indexOf(s.color))];
-function completeScan(c) {
+function completeScan(c, quiet = false) {   // quiet：一次扫多颗时，其他行星只入账、不弹卡片
   if (c.id === 'bh') {
     if (bhDone) { toast(T.toast.bhRecorded); return }
     if (frags < FRAG_N) { toast(T.toast.bhEcho(frags, FRAG_N), 'warn'); beep(120, .5, 'sine', .06); return }
@@ -1045,10 +1209,10 @@ function completeScan(c) {
   did.scan = true;
   const p = c.p, isNew = !discovered.has(p.id);
   if (isNew) {
-    addXp(PLANET_XP(p));
+    const gx = xpSeen.has(p.id) ? 0 : PLANET_XP(p); xpSeen.add(p.id); addXp(gx);
     if (p.ring || p.moons >= 3) know('ringMoon', 1500);
     discovered.add(p.id); credits += p.info.value; fuel = Math.min(fuelMax(), fuel + p.info.fuelGain);
-        toast(T.toast.discovered(p.name, p.info.value, PLANET_XP(p)), 'good');
+        toast(T.toast.discovered(p.name, p.info.value, gx), 'good');
     [660, 880, 1100].forEach((f, i) => beep(f, .18, 'triangle', .06, i * .09)); doSave();
     const sys = systems[+p.id.split(':')[0]];
     if (genPlanets(sys).every(q => q.home || discovered.has(q.id))) {
@@ -1056,14 +1220,39 @@ function completeScan(c) {
       if (!doneSys.has(sys.i)) { doneSys.add(sys.i); addXp(gain) }
       toast(T.toast.sysComplete(sys.name, gain), 'good');
       shootPano(sys.i, true);   // 完成星系扫描：自动拍下这个星系的全景图
+      quizCheck = true;   // 完成星系：等收藏、晋升都收完后，按经验检查要不要弹知识测验
       collectWait(sys.i);   // 收藏页要等行星卡片飞走（或玩家关掉介绍）、其他面板都关了才弹；晋升弹窗再排在收藏之后
     }
   } else beep(500, .1);
   takeSample(p);
-  showCard(p, isNew);
+  if (!quiet) showCard(p, isNew);
   // 主线：当前碎片对应的异常行星（即使之前已扫描过，再扫一次也能取得碎片）
   if (qOn() && fragKind(frags) === 'planet' && p.id === fragSys[frags] + ':' + fragPlanetIdx(frags)) collectFragment(true);
 }
+
+// ---- 范围扫描（扫描仪升级后：鼠标右键 / V） ----
+// 圈内、扫描距离内的行星全部一起扫（不设数量上限）；已扫描过的和主线碎片行星不参与（碎片行星要单独扫，才会播放剧情）
+let noteQ = [];   // 范围扫描后，要依次弹出的「第一次遇到某类行星」的介绍
+function scanGroup(list) {
+  const wasNew = new Map(list.map(p => [p, !discovered.has(p.id)]));
+  for (const p of list) completeScan({ id: p.id, p }, true);   // 每颗各算各的：信用点、经验、采样、收藏、完成星系
+  toast(T.toast.multiScan(list.length), 'good');
+  showMulti(list, wasNew);
+}
+function showMulti(list, wasNew) {
+  const box = $('multi').firstElementChild;
+  box.innerHTML = H.multiHtml(list.map(p => ({ src: cardURL(p), name: p.name, reward: wasNew.get(p) ? T.multi.reward(p.info.value) : T.cards.collected, isNew: wasNew.get(p) })));
+  box.querySelectorAll('.c-mc').forEach(el => el.onclick = () => { bigList = [...box.querySelectorAll('img')]; showBig(+el.dataset.i) });   // 点一张放大（可翻页、下载）
+  $('multiOk').onclick = () => closePanel();
+  openPanel('multi'); afterKnow = () => queueNotes(list);   // 关掉之后，再依次弹出「第一次遇到」的介绍
+  beep(880, .08, 'triangle', .05); beep(1100, .1, 'triangle', .05, .08);
+}
+function queueNotes(list) {
+  const keys = new Set(); noteQ = [];
+  for (const p of list) { const key = p.cat ? 'cat_' + p.cat : 'kind_' + p.kind; if (KNOW[key] && !knowSeen.has(key) && !keys.has(key)) { keys.add(key); noteQ.push(p) } }
+  nextNote();
+}
+function nextNote() { const p = noteQ.shift(); if (p) showCard(p, false) }
 
 // =====================================================================
 // 主更新
@@ -1075,7 +1264,7 @@ let boostLock = false, saveTimer = 0, wr = 0, scooping = false;
 function update(dt) {
   // ---- 转向 ----
   const k = keys, rollIn = (k.KeyE ? 1 : 0) - (k.KeyQ ? 1 : 0), yawIn = (k.ArrowLeft ? 1 : 0) - (k.ArrowRight ? 1 : 0), pitchIn = (k.ArrowUp ? 1 : 0) - (k.ArrowDown ? 1 : 0);
-  if (!warp) {
+  if (!warp && !falling) {
     if (rollIn || yawIn || pitchIn) { tE.set(pitchIn * 1.2 * dt, yawIn * 1.4 * dt, -rollIn * 1.4 * dt); tQ.setFromEuler(tE); ship.quat.multiply(tQ) }
     if (mouseDX || mouseDY) { tE.set(-mouseDY * .0022, -mouseDX * .0022, 0); tQ.setFromEuler(tE); ship.quat.multiply(tQ) }
   }
@@ -1095,6 +1284,10 @@ function update(dt) {
     if (remaining < 4) endWarp(true);
     else if (k.KeyS) endWarp(false);
     energy = Math.min(energyMax(), energy + 10 * dt);
+  } else if (falling) {   // 越过不可回头点：失控翻滚着被拖向奇点，不再响应操作
+    tV.copy(bh.position).sub(ship.pos).normalize();
+    ship.vel.lerp(tV.multiplyScalar(1.5 + .08 * falling.t * falling.t), 1 - Math.exp(-dt * 2));   // 慢慢加速，下落约 9～10 秒
+    tE.set(0, 0, dt * (.45 + .46 * falling.t / 9.4)); tQ.setFromEuler(tE); ship.quat.multiply(tQ);   // 镜头绕视线滚转：画面顺时针转（左边向上、上边向右、右边向下、下边向左），约 9.4 秒正好转一圈（360°），越转越快；黑洞始终在画面中央
   } else {
     inp.set((k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0), (k.KeyZ ? 1 : 0) - (k.KeyC ? 1 : 0), (k.KeyS ? 1 : 0) - (k.KeyW ? 1 : 0));
     const shift = k.ShiftLeft || k.ShiftRight;
@@ -1105,6 +1298,11 @@ function update(dt) {
     else energy = Math.min(energyMax(), energy + (14 + 4 * up.boost) * dt);
     const moving = inp.lengthSq() > 0;
     if (moving) inp.normalize().multiplyScalar(maxSpeed() * (boosting ? 4 : 1)).applyQuaternion(ship.quat);
+    if (tideDepth > 0) {   // 奇点引力：远离奇点的分量被削弱（后退尤其吃力），整体速度也被拖慢；越近越明显
+      tV2.copy(ship.pos).sub(bh.position).normalize(); const out = inp.dot(tV2);
+      if (out > 0) inp.addScaledVector(tV2, -out * .9 * tideDepth);
+      inp.multiplyScalar(1 - .3 * tideDepth);
+    }
     ship.vel.lerp(inp, 1 - Math.exp(-dt * (moving ? 2.4 : .8)));
   }
   ship.pos.addScaledVector(ship.vel, dt);
@@ -1195,16 +1393,29 @@ function update(dt) {
     for (const L of loaded) for (const pl of L.planets) { if (!pl.show || pl.p.home) continue; pl.mesh.getWorldPosition(tV2); test(pl.p.id, tV2, pl.p.radius * 1.2 + .5, scanRange(), { p: pl.p, name: pl.p.name }) }
     test('bh', bh.position, BH_T.effR, BH_T.range, { name: BH_T.name });
   }
+  // 范围扫描（鼠标右键 / V）：圈内、扫描距离内的行星一起扫；F / 左键仍只扫准星对准的那一颗
+  multiOn = !!(mouseRight || k[MULTI_KEY]) && up.scanner > 0 && !paused();
+  if (!warp && multiOn) {
+    const tol = multiTol(), grp = [];
+    for (const L of loaded) for (const pl of L.planets) {
+      if (!pl.show || pl.p.home || discovered.has(pl.p.id) || isQuestPlanet(pl.p)) continue;
+      pl.mesh.getWorldPosition(tV2); tV.copy(tV2).sub(ship.pos); const d = tV.length(); if (d > scanRange() || d < .1) continue;
+      const ang = Math.acos(Math.min(1, tV.dot(tV3) / d)), angR = Math.asin(Math.min(1, (pl.p.radius * 1.2 + .5) / d));
+      if (ang < tol + angR) grp.push({ p: pl.p, d });
+    }
+    grp.sort((a, b) => a.d - b.d);   // 圈内、扫描距离内的行星全部一起扫（不设数量上限；扫描仪等级只决定圈的大小）
+    if (grp.length) cand = { id: 'multi', d: grp[0].d, multi: grp };
+  }
   scanCand = cand;
-  const holding = (mouseHeld || k.KeyF) && cand && !paused();
+  const holding = (mouseHeld || k.KeyF || multiOn) && cand && !paused();
   if (holding) {
     if (scanId !== cand.id) { scanId = cand.id; scanT = 0 }
     if (cand.star && flare) {   // 耀斑预警期间扫描恒星会被打断
       if (scanT > 0 && flare !== scanBreakFlare) { scanBreakFlare = flare; toast(T.hud.scanBreak, 'warn') }
       scanT = 0;
-    } else scanT += dt / (scanTime() * (cand.star ? .7 + .6 * Math.max(0, Math.min(1, (cand.d - cand.R * 3) / (cand.R * 4))) : 1));   // 恒星：越近扫得越快（0.7～1.3 倍时间）
-    if (scanT >= 1) { completeScan(cand); scanT = 0; mouseHeld = false; keys.KeyF = false }
-  } else { scanT = Math.max(0, scanT - dt * 2); if (!cand) scanId = null }
+    } else scanT += dt / (cand.id === 'bh' ? 6 + 2 * scanTime() : scanTime() * (cand.star ? .7 + .6 * Math.max(0, Math.min(1, (cand.d - cand.R * 3) / (cand.R * 4))) : 1));   // 恒星：越近扫得越快（0.7～1.3 倍时间）；奇点：约 12 秒（升级扫描仪最多缩到 7 秒），要一边扫描一边顶住引力
+    if (scanT >= 1) { if (cand.multi) scanGroup(cand.multi.map(g => g.p)); else completeScan(cand); scanT = 0; mouseHeld = mouseRight = false; keys.KeyF = keys[MULTI_KEY] = false }
+  } else { scanT = Math.max(0, scanT - dt * (scanId === 'bh' ? .35 : 2)); if (!cand) scanId = null }   // 奇点的进度掉得慢一些（约 3 秒清零），偏一下不至于前功尽弃
 
   // ---- 摄像机 ----
   camera.position.copy(ship.pos); camera.quaternion.copy(ship.quat);
@@ -1229,7 +1440,7 @@ function toScreen(pos) {
 
 function updateHUD() {
   $('credits').textContent = credits;
-  { const r = rank(), el = $('rankTxt'); if (el) el.innerHTML = H.rankStars(r) + T.rank.hud(RANKS[r].name, xp, RANK_NEED[r]) }
+  { const r = rank(), el = $('rankTxt'); if (el) el.innerHTML = H.rankStars(r) + T.rank.hud(RANKS[r].name, xp, RANK_NEED[r]) + (secret ? ' · ✦' + T.rank.title : '') }
   $('cargoTxt').textContent = `${cargoUsed()}/${cargoMax()}`;
   $('hullTxt').textContent = hull < HULL_MAX * .3 ? T.hud.hullDamaged(hull.toFixed(0), HULL_MAX) : `${hull.toFixed(0)}/${HULL_MAX}`;
   $('hullBar').firstElementChild.style.width = hull / HULL_MAX * 100 + '%';
@@ -1247,14 +1458,19 @@ function updateHUD() {
 
   // 准星
   const ret = $('reticle'); ret.classList.toggle('hit', !!scanCand);
+  { const r2 = $('ring2'), focal = innerHeight / 2 / Math.tan(camera.fov * Math.PI / 360);   // 范围扫描圈：按弧度换算成屏幕像素，随扫描仪等级变大
+    r2.style.display = up.scanner > 0 ? '' : 'none'; r2.setAttribute('r', Math.max(30, Math.tan(multiTol()) * focal).toFixed(1)); r2.classList.toggle('on', multiOn) }
   $('ring').style.strokeDashoffset = 163.4 * (1 - Math.min(1, scanT));
 
   // 提示
   let pr = '';
   if (warp) pr = T.hud.promptWarp(warp.target.name);
   else if (scanCand) {
-    const known = scanCand.p ? discovered.has(scanCand.p.id) : bhDone;
-    pr = T.hud.promptScan(scanCand.p && !known ? T.hud.unknownBody : scanCand.name, Math.round(scanCand.d), known);   // 还没扫描过的行星不显示名字
+    if (scanCand.multi) pr = T.hud.promptMulti(scanCand.multi.length, Math.round(scanCand.d));
+    else {
+      const known = scanCand.p ? discovered.has(scanCand.p.id) : bhDone;
+      pr = T.hud.promptScan(scanCand.p && !known ? T.hud.unknownBody : scanCand.name, Math.round(scanCand.d), known) + (up.scanner > 0 && scanCand.p ? T.hud.multiHint : '');   // 还没扫描过的行星不显示名字
+    }
   } else if (scooping) pr = T.ui.scooping;
   else if (document.pointerLockElement !== renderer.domElement && !openP) pr = T.ui.pointerLock;
   $('prompt').innerHTML = H.kbd(pr);
@@ -1330,7 +1546,7 @@ function renderCargo() {
   $('cbody').innerHTML = H.cargoHtml(rows.map(([k, n]) => {
     const u = USE[k], useless = !u || (u.fuel && fuel >= fuelMax()) || (u.hull && hull >= HULL_MAX);
     return { name: k, n, label: u ? u.label : null, disabled: !!useless, price: PRICE[k] ?? 10 };
-  }));
+  })) + (secret ? H.podHtml() : '');
   // 物品按钮事件
   $('cbody').querySelectorAll('button[data-u]').forEach(b => b.onclick = () => {
     const k = b.dataset.u, u = USE[k]; if (!cargo[k]) return;
@@ -1338,9 +1554,13 @@ function renderCargo() {
     if (--cargo[k] <= 0) delete cargo[k]; beep(660, .12, 'triangle'); toast(T.toast.useItem(k, u.label), 'good'); doSave(); renderCargo();
   });
   // 出售按钮事件
-  $('cbody').querySelectorAll('button[data-r]').forEach(b => b.onclick = () => {
-    const k = b.dataset.r; credits += (cargo[k] || 0) * (PRICE[k] ?? 10); delete cargo[k]; beep(740, .15, 'triangle'); doSave(); renderCargo();
-  });
+  const sell = (k, all) => {   // 出售一个，或这一格全部
+    const n = all ? (cargo[k] || 0) : Math.min(1, cargo[k] || 0); if (!n) return;
+    credits += n * (PRICE[k] ?? 10); cargo[k] -= n; if (cargo[k] <= 0) delete cargo[k];
+    beep(740, .15, 'triangle'); doSave(); renderCargo();
+  };
+  $('cbody').querySelectorAll('button[data-r]').forEach(b => b.onclick = () => sell(b.dataset.r, false));
+  $('cbody').querySelectorAll('button[data-ra]').forEach(b => b.onclick = () => sell(b.dataset.ra, true));
 }
 const UPG = ['engine', 'tank', 'scanner', 'cargo', 'boost'].map(k => ({ k, name: T.upg[k].name, desc: T.upg[k].desc }));
 const upCost = k => Math.round(120 * Math.pow(up[k] + 1, 2));
@@ -1431,13 +1651,17 @@ document.querySelectorAll('.tab').forEach(b => b.onclick = () => {
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('hidden', p.id !== b.dataset.tab));
 });
 $('saveHint').textContent = save ? T.start.saveFound(discovered.size, credits, seed) : T.start.seedOnly(seed);
+if (TEST_END) $('saveHint').textContent = `🧪 结局测试模式（end=${TEST_END}）：使用临时存档，不读写你的真实存档`;
 $('btnStart').textContent = save ? T.start.btnContinue : T.start.btnNew;
 $('btnStart').onclick = () => {
   running = true; $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
   renderer.domElement.requestPointerLock?.(); beep(440, .1);
+  if (TEST_END) ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(ship.pos, bh.position, UP));   // 测试结局：开局正对奇点
   setQuestTarget();
 };
 $('btnEndClose').onclick = () => closePanel();
+$('btnEndQuit').onclick = () => { doSave(); location.reload() };   // 结束游戏：回到开始界面（继续探险 / 新的银河）
+$('btnRestart').onclick = () => location.reload();                  // 失败后重新开始：同一个银河，从家园出发
 $('btnProbe').onclick = probeTarget;
 $('btnNew').onclick = () => { try { localStorage.removeItem(SAVE_KEY) } catch { }; location.search = '?seed=' + Math.floor(Math.random() * 1e6) };
 addEventListener('beforeunload', doSave);
@@ -1451,7 +1675,7 @@ const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), .05);
-  if (running) { promoTick(); welcomeTick() }  
+  if (running) { promoTick(); quizTick(); welcomeTick() }  
   if (running && !paused()) { update(dt); hazards(dt); redFx(); hullWarn(); tutTick(dt); updateHUD() }
   else if (running) { updateHUD(); tutTick(dt) }   // 面板打开时游戏暂停，但 HUD 和教学提示仍要同步
   else if (!running) { // 开始界面：缓慢环视
