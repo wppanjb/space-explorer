@@ -88,6 +88,8 @@
 .c-ctabs button { background: rgba(127, 212, 255, .08); border: 1px solid rgba(127, 212, 255, .3); color: #9fb4d6; padding: 4px 12px; border-radius: 6px; cursor: pointer; font: inherit }
 .c-ctabs button.on { background: rgba(127, 212, 255, .22); color: #e8f1ff; border-color: rgba(127, 212, 255, .7) }
 .c-ctabs .c-shot { margin-left: auto }
+.c-ctabs .c-dl { background: rgba(255, 179, 71, .12); border-color: rgba(255, 179, 71, .55); color: #ffd9a0 }
+.c-ctabs .c-dl:disabled { opacity: .5; cursor: wait }
 .c-ctabs .c-sort { background: rgba(8, 14, 32, .9); color: #fff; border: 1px solid rgba(127, 212, 255, .3); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px }
 #cgrid.pano { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)) }
 

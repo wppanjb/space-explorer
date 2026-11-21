@@ -652,6 +652,54 @@ try { panoSort = localStorage.getItem('deepspace-panosort') === 'name' ? 'name' 
   $('panoShot').insertAdjacentHTML('afterend', `<select id="panoSort" class="c-sort"><option value="new">${T.pano.sortNew}</option><option value="name">${T.pano.sortName}</option></select>`);
   $('panoSort').value = panoSort; $('panoSort').onchange = e => { panoSort = e.target.value; try { localStorage.setItem('deepspace-panosort', panoSort) } catch { } e.target.blur(); renderCards() };
 })();
+// ---- 一次下载全部收藏：行星卡 + 星系全景，打成一个 ZIP（不压缩，PNG 本来就是压缩过的；自己写，不依赖库） ----
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0 } return t })();
+const crc32 = u8 => { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0 };
+const dataUrlBytes = u => { const b = atob(u.slice(u.indexOf(',') + 1)), a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a };
+function makeZip(files) {   // files: [{ name, data: Uint8Array }] → Blob
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  const d = new Date(), dt = ((d.getFullYear() - 1980) << 9 | (d.getMonth() + 1) << 5 | d.getDate()) << 16 | (d.getHours() << 11 | d.getMinutes() << 5 | d.getSeconds() >> 1);
+  for (const f of files) {
+    const nm = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const h = new DataView(new ArrayBuffer(30)); h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);   // 0x0800 = 文件名是 UTF-8
+    h.setUint16(8, 0, true); h.setUint16(10, dt & 0xFFFF, true); h.setUint16(12, dt >>> 16, true); h.setUint32(14, crc, true); h.setUint32(18, sz, true); h.setUint32(22, sz, true); h.setUint16(26, nm.length, true); h.setUint16(28, 0, true);
+    parts.push(h.buffer, nm, f.data);
+    const c = new DataView(new ArrayBuffer(46)); c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+    c.setUint16(12, dt & 0xFFFF, true); c.setUint16(14, dt >>> 16, true); c.setUint32(16, crc, true); c.setUint32(20, sz, true); c.setUint32(24, sz, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(c.buffer, nm); off += 30 + nm.length + sz;
+  }
+  const cLen = central.reduce((a, b) => a + b.byteLength, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, cLen, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, e.buffer], { type: 'application/zip' });
+}
+const safeName = n => n.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim() || '未命名';
+let dlBusy = false;
+async function downloadAll() {
+  if (dlBusy) return;
+  const homeIds = genPlanets(systems[0]).filter(p => p.home).map(p => p.id);
+  const cardIds = [...new Set([...discovered, ...homeIds])].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
+  const panoIds = panoOrder(), total = cardIds.length + panoIds.length;
+  if (!total) { toast(T.dl.empty, 'warn'); return }
+  dlBusy = true; const btn = $('dlAll'); btn.disabled = true;
+  try {
+    const files = [], used = new Set(), uniq = (dir, base) => { let n = `${dir}/${safeName(base)}`, k = 2; while (used.has(n)) n = `${dir}/${safeName(base)} (${k++})`; used.add(n); return n + '.png' };
+    let i = 0;
+    for (const id of cardIds) {
+      const [si, pi] = id.split(':').map(Number), p = genPlanets(systems[si])[pi];
+      files.push({ name: uniq(T.dl.dirCards, p.name), data: dataUrlBytes(cardURL(p)) });
+      if (++i % 4 === 0) { btn.textContent = T.dl.busy(i, total); await new Promise(r => setTimeout(r)) }   // 让出线程，按钮文字才会刷新
+    }
+    for (const si of panoIds) {
+      files.push({ name: uniq(T.dl.dirPano, systems[si].name + T.dl.panoSuffix), data: dataUrlBytes(panoURL(si)) });
+      if (++i % 2 === 0) { btn.textContent = T.dl.busy(i, total); await new Promise(r => setTimeout(r)) }
+    }
+    const a = document.createElement('a'), url = URL.createObjectURL(makeZip(files)), d = new Date(), z = n => String(n).padStart(2, '0');
+    a.href = url; a.download = `deep-space-collection-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.zip`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast(T.dl.done(cardIds.length, panoIds.length), 'good');
+  } finally { dlBusy = false; btn.disabled = false; btn.textContent = T.dl.btn }
+}
+(() => { $('ctabs').insertAdjacentHTML('beforeend', `<button id="dlAll" class="c-dl">${T.dl.btn}</button>`); $('dlAll').onclick = e => { e.target.blur(); downloadAll() } })();
 const panoOrder = () => Object.keys(panos).map(Number).sort(panoSort === 'name' ? (a, b) => systems[a].name.localeCompare(systems[b].name) : (a, b) => panos[b].t - panos[a].t || b - a);   // 默认最新的在最上面；也可按名字排
 function renderCards() {
   renderTx();
