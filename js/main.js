@@ -718,7 +718,7 @@ function renderCards() {
   $('cflt').innerHTML = [
     H.optionHtml('all', T.cards.all(ids.length)),
     H.optionHtml('cur', T.cards.current(curSysI >= 0 ? systems[curSysI].name : '')),
-    ...[...bySys].sort((a, b) => a[0] - b[0]).map(([s, n]) => H.optionHtml(s, T.cards.system(systems[s].name, n, systems[s].nPlanets)))
+    ...[...bySys].sort((a, b) => systems[a[0]].name.localeCompare(systems[b[0]].name, 'en', { numeric: true, sensitivity: 'base' })).map(([s, n]) => H.optionHtml(s, T.cards.system(systems[s].name, n, systems[s].nPlanets)))
   ].join('');
   $('cflt').value = cardFilter;
   const want = cardFilter === 'all' ? null : cardFilter === 'cur' ? curSysI : +cardFilter;
