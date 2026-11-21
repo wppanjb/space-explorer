@@ -1,5 +1,5 @@
 // 全局常量与剧情文本
-export const VERSION = '0.9.0';
+export const VERSION = '0.10.0';
 // TAU = 2π，GR = 银河半径，HOME_POS = 初始星系位置
 export const TAU = Math.PI * 2, GR = 1400, HOME_POS = [484, 0, 132];
 export const ROMAN = ['I','II','III','IV','V','VI','VII','VIII'];

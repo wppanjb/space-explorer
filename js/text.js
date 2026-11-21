@@ -66,7 +66,7 @@ export const T = {
     count: (a, b) => `已扫描行星 ${a}/${b}`, srcReal: '真实星系 · 数据来自天文观测，示意图不按比例', srcGen: '游戏生成的星系 · 示意图不按比例'
   },
   star: {
-    title: name => `${name} · 主恒星`, tagReal: '真实恒星 · 数据来自观测', tagGen: '游戏里的恒星 · 数据是设定',
+    title: name => `${name} · 主恒星`, tagReal: '真实恒星 · 数据来自天文观测', tagGen: '游戏里的恒星 · 数据是设定',
     type: '类型', temp: '表面温度', radius: '半径', mass: '质量', dist: '距离', measured: '实测', generated: '生成',
     data: '扫描数据', flareHead: '耀斑与高温',
     flare: (f, melt, fl) => `${f >= 2 ? '耀斑非常频繁' : f < 1 ? '耀斑比较少' : '耀斑频率普通'}。离恒星 <b>${melt} u</b> 以内是熔毁区，船体会持续受损；<b>${fl} u</b> 以内可能遭遇耀斑，越近越危险。`,
