@@ -1033,7 +1033,7 @@ function wreck() {
 }
 // ---- 奇点潮汐 + 红屏 ----
 const FALL_R = 40, NOGO_SHOW = 110;       // 不可回头点半径（越过就无法脱离）/ 开始显示距离读数的半径
-let falling = null, alarmCd = 0;
+let falling = null, alarmCd = 0, tideCd = 0, alarmFlip = false;   // tideCd：潮汐区心跳音的计时；alarmFlip：警报双音交替
 const TIDE_R = 160;                      // 潮汐区半径：进入后被拉向奇点、船体持续受损
 let tideDepth = 0, inTide = false;       // 0（区外）~ 1（奇点中心）
 // 奇点警告：靠近到 BH_WARN_ON 以内就弹出，一直显示到进入 BH_WARN_OFF 以内（飞远到 BH_WARN_RESET 以外才会重置，下次靠近再弹）；没授权的话末尾多提醒一句（只提醒，不阻止）
@@ -1065,12 +1065,22 @@ function tide(dt) {
     hull = Math.max(0, hull - (1.5 + 5 * tideDepth * tideDepth) * dt);    // 船体持续受损
     if (!inTide) { inTide = true; beep(100, .4, 'sawtooth', .06) }
   } else if (inTide && d > TIDE_R * 1.05) inTide = false;
+  // 潮汐区（TIDE_R → NOGO_SHOW）：低沉的「咚—咚」心跳，越靠近间隔越短、越响、音调越高
+  if (tideDepth > 0 && d >= NOGO_SHOW && !falling) {
+    const kt = (d - NOGO_SHOW) / (TIDE_R - NOGO_SHOW);   // 1 = 刚进潮汐区，0 = 到 NOGO_SHOW
+    tideCd -= dt; if (tideCd <= 0) { const f = 55 + 25 * (1 - kt), v = .07 + .05 * (1 - kt); beep(f, .2, 'sine', v); beep(f * .85, .24, 'sine', v * .8, .2); tideCd = .55 + 1.1 * kt }
+  } else tideCd = 0;
   // 不可回头点：第二段警告 = HUD 距离读数 + 越近越急的警报；越过就无法脱离
   const nogo = $('nogo');
   if (d < NOGO_SHOW) {
     const k = Math.max(0, (d - FALL_R) / (NOGO_SHOW - FALL_R));
     nogo.classList.remove('hidden'); nogo.innerHTML = T.toast.nogoDist(Math.max(0, d - FALL_R).toFixed(0)) + (d > FALL_R && !falling && !warp ? '<br><small>' + T.toast.emgHint + '</small>' : '');   // 距离读数旁边一起提示紧急曲速
-    alarmCd -= dt; if (alarmCd <= 0) { beep(330 + 300 * (1 - k), .1, 'square', .05); alarmCd = .2 + 1.3 * k }
+    // 越过 NOGO_SHOW：双音警报，越近越尖、越密、越响；每两声夹一下低沉的重击
+    alarmCd -= dt; if (alarmCd <= 0 && !falling) {
+      alarmFlip = !alarmFlip; const hi = 420 + 520 * (1 - k), v = .05 + .035 * (1 - k);
+      beep(alarmFlip ? hi : hi * .72, .1, 'square', v); if (!alarmFlip) beep(48, .22, 'sine', .1 + .05 * (1 - k), .02);
+      alarmCd = .1 + .5 * k;
+    }
   } else nogo.classList.add('hidden');
   if (d < FALL_R) startFall();
 }
