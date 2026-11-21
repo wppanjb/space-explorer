@@ -52,6 +52,7 @@ const visited = new Set(save?.visited || []);
 for (const id of [...discovered]) { const [si, pi] = id.split(':').map(Number); const sy = systems[si]; if (!sy || !(pi < genPlanets(sy).length)) discovered.delete(id) }   // 旧存档里已不存在的行星（比如以前补的推测行星）直接去掉
 const probed = new Set(save?.probed || []);
 let bhDone = !!save?.ended;
+let lost = !!save?.lost;   // 只有一次机会：越过不可回头点 = 这个银河的旅程结束。之后飞船停在家园星系，只能看收藏（K）和知识库（L），或者开始新的银河
 let secret = !!save?.secret;   // 扫描奇点后得知「生命的秘密」（称号、培育舱伏笔）
 const xpSeen = new Set(save?.xpSeen ?? (save?.discovered || []));   // 已给过首次扫描经验的行星：失败后收藏归零、重新扫描不再给经验
 const panoGiven = new Set((save?.panoGiven ?? Object.keys(save?.panos || {})).map(String));   // 已给过全景奖励的星系
@@ -96,7 +97,7 @@ function doSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
-      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, secret, quiz, xpSeen: [...xpSeen], panoGiven: [...panoGiven], sent: { cards: [...sent.cards], panos: sent.panos }, frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
+      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, lost, secret, quiz, xpSeen: [...xpSeen], panoGiven: [...panoGiven], sent: { cards: [...sent.cards], panos: sent.panos }, frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
 }
@@ -412,6 +413,12 @@ addEventListener('keydown', e => {
   if (openP === 'quiz') { e.preventDefault(); if (!e.repeat) quizKey(e); return }   // 测验：只响应测验自己的按键（开始后不能打开知识库等任何面板）
   if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
   if (!$('cardbig').classList.contains('hidden') && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) { showBig(bigI + (e.code === 'ArrowLeft' ? -1 : 1)); return }
+  if (lost) {   // 旅程已结束：只响应 K（收藏）和 Esc；没有知识库
+    if (e.repeat || openP === 'gameover') return;
+    if (e.code === 'Escape') { if (!$('cardbig').classList.contains('hidden')) $('cardbig').classList.add('hidden'); else if (openP) closePanel() }
+    else if (e.code === 'KeyK') openPanel('cards');
+    return;
+  }
   if (e.repeat || openP === 'gameover') return;
   if (cardHold && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' || e.code === 'Escape')) { dismissCard(); return }
   if ((openP === 'know' || openP === 'multi') && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) { closePanel(); return }
@@ -442,7 +449,7 @@ addEventListener('mousedown', e => { if (document.pointerLockElement !== rendere
 addEventListener('mouseup', e => { if (e.button === 0) mouseHeld = false; if (e.button === 2) mouseRight = false });
 addEventListener('contextmenu', e => { if (document.pointerLockElement === renderer.domElement) e.preventDefault() });
 renderer.domElement.addEventListener('click', () => {
-  if (running && !paused() && !openP && document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock?.()
+  if (running && !lost && !paused() && !openP && document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock?.()
 });
 
 // 辉光开关（记住选择）
@@ -588,7 +595,8 @@ function panoSysIdx() {   // 此刻在哪个星系的拍摄范围内（多个重
   for (const s of systems) { const d = s.pos.distanceTo(ship.pos); if (d < 320 && d < bd && d <= panoRange(s)) { bd = d; bi = s.i } }
   return bi;
 }
-function shootPano(si = panoSysIdx(), auto = false) {   // auto：扫完全部行星时自动拍一张（不闪白屏）
+function shootPano(si = panoSysIdx(), auto = false) {
+  if (lost) return;   // auto：扫完全部行星时自动拍一张（不闪白屏）
   if (si < 0) { toast(T.pano.noSys, 'warn'); return }
   const sys = systems[si], pl = genPlanets(sys), first = !panoGiven.has(String(sys.i));
   panos[sys.i] = { t: Date.now(), ids: pl.filter(p => p.home || discovered.has(p.id)).map(p => p.id) };
@@ -636,6 +644,7 @@ function txHud() {
 }
 function renderTx() {
   const el = $('txbar'); if (!el) return;
+  el.style.display = lost ? 'none' : '';   // 旅程结束后不能再传送
   if (tx) { el.innerHTML = `<span>${T.tx.busy(tx.i, tx.q.length)}</span>`; return }
   const I = txInfo();
   el.innerHTML = I.n ? `<span>${T.tx.unsent(I.nc, I.np)}</span><button id="txGo"${fuel < I.fuel ? ' class="low"' : ''}>${T.tx.go(I.fuel, Math.round(I.n * I.sec))}</button><span class="hint">${T.tx.legend}</span>` : `<span class="hint">${T.tx.allSent}</span>`;
@@ -702,7 +711,7 @@ async function downloadAll() {
 (() => { $('ctabs').insertAdjacentHTML('beforeend', `<button id="dlAll" class="c-dl">${T.dl.btn}</button>`); $('dlAll').onclick = e => { e.target.blur(); downloadAll() } })();
 const panoOrder = () => Object.keys(panos).map(Number).sort(panoSort === 'name' ? (a, b) => systems[a].name.localeCompare(systems[b].name) : (a, b) => panos[b].t - panos[a].t || b - a);   // 默认最新的在最上面；也可按名字排
 function renderCards() {
-  renderTx();
+  renderTx(); $('panoShot').style.display = lost ? 'none' : '';
   $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === cardTab));
   $('panoSort').style.display = cardTab === 'pano' ? '' : 'none';
   $('cflt').parentElement.style.display = cardTab === 'pano' ? 'none' : ''; $('cgrid').classList.toggle('pano', cardTab === 'pano');
@@ -1146,19 +1155,6 @@ function fallTick(dt) {   // 第三段：屏幕扭曲、船体异响，几秒后
   alarmCd -= dt; if (alarmCd <= 0) { beep(55 + Math.random() * 50, .28, 'sawtooth', .07); alarmCd = .3 }
   if (t > 16 || d < 5.8) showFail();
 }
-function drawFailArt() {   // 无尽的黑暗里，一艘小飞船静静漂浮，远处只剩一道微弱的吸积盘余光
-  const cv = $('goCanvas'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
-  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-  let s = 7; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
-  for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(200,215,255,${.05 + rnd() * .22})`; g.fillRect(rnd() * W, rnd() * H, 1 + (rnd() < .1), 1) }
-  const gl = g.createRadialGradient(W * .8, H * .55, 3, W * .8, H * .55, 110); gl.addColorStop(0, 'rgba(255,150,60,.4)'); gl.addColorStop(.45, 'rgba(255,90,40,.1)'); gl.addColorStop(1, 'rgba(0,0,0,0)');
-  g.fillStyle = gl; g.fillRect(0, 0, W, H);
-  g.save(); g.translate(W * .38, H * .5); g.rotate(-.35);   // 飞船剪影
-  g.fillStyle = '#0b0f1a'; g.strokeStyle = 'rgba(160,190,255,.55)'; g.lineWidth = 1.4;
-  g.beginPath(); g.moveTo(34, 0); g.lineTo(-10, -13); g.lineTo(-22, -26); g.lineTo(-24, -8); g.lineTo(-30, 0); g.lineTo(-24, 8); g.lineTo(-22, 26); g.lineTo(-10, 13); g.closePath(); g.fill(); g.stroke();
-  g.fillStyle = 'rgba(127,212,255,.7)'; g.beginPath(); g.ellipse(8, 0, 7, 3, 0, 0, 7); g.fill();   // 驾驶舱的一点微光
-  g.restore();
-}
 // ---- 紧急曲速：在奇点潮汐区内、不可回头点之前，同时按 S + G：耗尽燃料、能量、货舱，飞船升级归零，船体降到 20%，立刻曲速回家园星系（可以无限次，代价很重） ----
 function emergencyOK() { if (!running || paused() || falling || warp?.emergency) return false; const d = ship.pos.distanceTo(bh.position); return d < TIDE_R && d > FALL_R }
 function emergencyWarp() {
@@ -1179,8 +1175,7 @@ function showFail() {   // 失败：知识库、军衔、信用点和已传回�
   hull = HULL_MAX; fuel = fuelMax(); energy = energyMax(); flare = null; inBelt = false; tideDepth = 0; inTide = false; scanT = 0; target = null;
   const best = homeSpot(), h = systems[0];
   ship.pos.copy(best); ship.vel.set(0, 0, 0); ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(best, h.pos, UP)); warp = null;
-  doSave(); drawFailArt(); $('redfx').style.opacity = 0;
-  openPanel('gameover'); beep(80, 1.4, 'sine', .06);
+  lost = true; doSave(); enterLost(); beep(80, 1.4, 'sine', .06);
 }
 let hullWarned = false;
 function hullWarn() {
@@ -1240,7 +1235,8 @@ function showQuizOffer(t) {
   $('qzSkip').onclick = () => closePanel();
   openPanel('quiz'); [660, 880].forEach((f, i) => beep(f, .15, 'triangle', .05, i * .1));
 }
-function startQuiz(t) {   // t：档位序号；null 或已经答过的档位 = 练习（不加经验）
+function startQuiz(t) {
+  if (lost) return;   // t：档位序号；null 或已经答过的档位 = 练习（不加经验）
   const tier = t != null && tierReady(t) ? t : null;
   const qs = drawQuiz(tier != null ? tierKeys(tier) : practiceKeys());
   if (!qs.length) { toast(T.quiz.noPool, 'warn'); return }
@@ -1912,16 +1908,72 @@ $('saveHint').textContent = save ? T.start.saveFound(discovered.size, credits, s
 if (TEST_END) $('saveHint').textContent = `🧪 结局测试模式（end=${TEST_END}）：使用临时存档，不读写你的真实存档`;
 $('btnStart').textContent = save ? T.start.btnContinue : T.start.btnNew;
 $('btnStart').onclick = () => {
-  running = true; $('start').classList.add('hidden'); $('hud').classList.remove('hidden');
+  running = true; $('start').classList.add('hidden');
+  $('hud').classList.remove('hidden');
   renderer.domElement.requestPointerLock?.(); beep(440, .1);
   if (TEST_END) ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(ship.pos, bh.position, UP));   // 测试结局：开局正对奇点
   setQuestTarget();
 };
 $('btnEndClose').onclick = () => closePanel();
 $('btnEndQuit').onclick = () => { doSave(); location.reload() };   // 结束游戏：回到开始界面（继续探险 / 新的银河）
-$('btnRestart').onclick = () => location.reload();                  // 失败后重新开始：同一个银河，从家园出发
+// ---- 旅程结束（只有一次机会）：停在「信号中断」画面，背景是在黑洞里漂浮；只有两个按钮：收藏 / 新的银河 ----
+let goAnimOn = false;
+function startGoAnim() {
+  if (goAnimOn) return; goAnimOn = true;
+  const cv = $('goBg'), g = cv.getContext('2d'), TAU2 = Math.PI * 2;
+  const fit = () => { const r = Math.min(devicePixelRatio || 1, 1.5); cv.width = Math.round(innerWidth * r); cv.height = Math.round(innerHeight * r) };
+  fit(); addEventListener('resize', fit);
+  let sd = 11; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  const stars = Array.from({ length: 300 }, () => ({ r: rnd() ** 1.5, a: rnd() * TAU2, v: .02 + rnd() * .06, b: .25 + rnd() * .75, f: .3 + rnd() * .7, w: .6 + rnd() * 1.3 }));
+  const t0 = performance.now();
+  const loop = now => {
+    const W = cv.width, H = cv.height, U = Math.min(W, H), cx = W * .5, cy = H * .38, R = U * .11, t = (now - t0) / 1000, pulse = 1 + .04 * Math.sin(t * .9);
+    g.globalCompositeOperation = 'source-over'; g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+    // 周围一圈暗红的光雾
+    let gr = g.createRadialGradient(cx, cy, R * .8, cx, cy, U * .75); gr.addColorStop(0, 'rgba(255,110,40,.22)'); gr.addColorStop(.35, 'rgba(120,40,20,.1)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    // 被引力拖成弧线的星光：绕着奇点缓慢旋转，越近越快、越红
+    g.save(); g.translate(cx, cy); g.rotate(-.25); g.lineCap = 'round';
+    for (const s of stars) {
+      const rr = R * 1.25 + s.r * U * .95, ang = s.a + t * s.v * (1.6 / (s.r + .18)), len = .03 + .22 * (1 - s.r) ** 2 + .02;
+      const near = 1 - s.r, cr = Math.round(200 + 55 * near), cg = Math.round(215 - 60 * near), cb = Math.round(255 - 150 * near);
+      g.strokeStyle = `rgba(${cr},${cg},${cb},${(s.b * (.25 + .75 * near)).toFixed(3)})`; g.lineWidth = s.w * (U / 700);
+      g.beginPath(); g.ellipse(0, 0, rr, rr * s.f, 0, ang - len, ang); g.stroke();
+    }
+    g.restore();
+    // 吸积盘（后半圈在黑球后面）
+    g.save(); g.translate(cx, cy); g.rotate(-.25); g.globalCompositeOperation = 'lighter';
+    const disk = (a0, a1) => { for (let k = 0; k < 5; k++) { g.strokeStyle = `rgba(255,${150 - k * 14},${70 - k * 8},${(.05 + k * .05).toFixed(3)})`; g.lineWidth = R * (.55 - k * .1) * pulse; g.beginPath(); g.ellipse(0, 0, R * 2.1, R * .5, 0, a0, a1); g.stroke() } };
+    disk(Math.PI, TAU2); g.restore();
+    // 事件视界
+    g.globalCompositeOperation = 'source-over'; g.fillStyle = '#000'; g.beginPath(); g.arc(cx, cy, R, 0, TAU2); g.fill();
+    g.save(); g.shadowColor = 'rgba(255,170,90,.9)'; g.shadowBlur = R * .35; g.strokeStyle = 'rgba(255,225,185,.85)'; g.lineWidth = Math.max(1.5, U * .0035); g.beginPath(); g.arc(cx, cy, R * 1.02, 0, TAU2); g.stroke(); g.restore();
+    g.save(); g.translate(cx, cy); g.rotate(-.25); g.globalCompositeOperation = 'lighter'; disk(0, Math.PI); g.restore();   // 前半圈在黑球前面
+    // 漂浮的飞船剪影
+    g.globalCompositeOperation = 'source-over'; g.save(); g.translate(W * .24 + Math.sin(t * .35) * U * .015, H * .5 + Math.cos(t * .28) * U * .02); g.rotate(-.35 + Math.sin(t * .22) * .14); g.scale(U / 650, U / 650);
+    g.fillStyle = '#0b0f1a'; g.strokeStyle = 'rgba(255,170,110,.55)'; g.lineWidth = 1.4;
+    g.beginPath(); g.moveTo(34, 0); g.lineTo(-10, -13); g.lineTo(-22, -26); g.lineTo(-24, -8); g.lineTo(-30, 0); g.lineTo(-24, 8); g.lineTo(-22, 26); g.lineTo(-10, 13); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(127,212,255,.7)'; g.beginPath(); g.ellipse(8, 0, 7, 3, 0, 0, 7); g.fill(); g.restore();
+    // 四周压暗
+    gr = g.createRadialGradient(cx, H * .5, U * .35, cx, H * .5, Math.max(W, H) * .75); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.8)'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+function enterLost() {
+  lost = true; running = true; falling = null; warp = null; target = null; mouseHeld = false; for (const k in keys) keys[k] = false;
+  if (openP) { panels[openP].classList.add('hidden'); openP = null } $('cardbig').classList.add('hidden');
+  document.exitPointerLock?.(); $('start').classList.add('hidden'); $('hud').classList.add('hidden'); $('nogo').classList.add('hidden'); $('redfx').style.opacity = 0; $('warpfx').style.opacity = 0;
+  const cv = renderer.domElement.style; cv.filter = cv.transform = cv.opacity = '';
+  { const h = document.querySelector('#gameover .hint'); if (h) h.textContent = T.tx.failKept(discovered.size, Object.keys(panos).length) }   // 此刻留下来的就是已传回的收藏
+  panels.gameover.classList.remove('hidden'); startGoAnim();
+}
+$('btnGrounded').onclick = e => { e.target.blur(); openPanel('cards') };
+if (lost) enterLost();   // 旅程已经结束的存档：直接停在「信号中断」画面
+const newGalaxy = () => { try { localStorage.removeItem(SAVE_KEY) } catch { }; location.search = '?seed=' + Math.floor(Math.random() * 1e6) };
+$('btnNewFail').onclick = () => { if (confirm(T.grounded.confirmNew)) newGalaxy() };
 $('btnProbe').onclick = probeTarget;
-$('btnNew').onclick = () => { try { localStorage.removeItem(SAVE_KEY) } catch { }; location.search = '?seed=' + Math.floor(Math.random() * 1e6) };
+$('btnNew').onclick = newGalaxy;
 addEventListener('beforeunload', doSave);
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -1933,13 +1985,15 @@ const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), .05);
-  if (running) { promoTick(); quizTick(); welcomeTick() }  
-  if (running && !paused()) { update(dt); txTick(dt); hazards(dt); redFx(); hullWarn(); tutTick(dt); updateHUD() }
+  if (running && !lost) { promoTick(); quizTick(); welcomeTick() }  
+  if (running && lost) { /* 旅程结束：停在「信号中断」画面，不运行游戏逻辑，也不再渲染 3D 场景 */ }
+  else if (running && !paused()) { update(dt); txTick(dt); hazards(dt); redFx(); hullWarn(); tutTick(dt); updateHUD() }
   else if (running) { updateHUD(); tutTick(dt) }   // 面板打开时游戏暂停，但 HUD 和教学提示仍要同步
   else if (!running) { // 开始界面：缓慢环视
     tQ.setFromEuler(tE.set(0, dt * .04, 0)); ship.quat.multiply(tQ); camera.quaternion.copy(ship.quat); updateLOD();
   }
   if (openP === 'map') drawMap();
+  if (lost) return;
   if (bloomOn) composer.render(); else renderer.render(scene, camera);
 }
 updateLOD(); frame();

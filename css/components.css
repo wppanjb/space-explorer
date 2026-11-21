@@ -108,10 +108,11 @@
 #nogo { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); padding: 6px 16px; border: 1px solid rgba(255,90,70,.8); background: rgba(80,0,0,.55); color: #ff9a8a; font-weight: 600; letter-spacing: .08em; border-radius: 4px; animation: nogoBlink .8s infinite; pointer-events: none }
 #nogo .key-hint { font-size: 18px; font-weight: 800; color: #ffd54a; text-shadow: 0 0 6px rgba(255, 213, 74, .8); }
 @keyframes nogoBlink { 50% { opacity: .45 } }
-#gameover { background: #000; animation: goFade 2s ease both }
+#gameover { background: #000; animation: goFade 2s ease both; align-items: flex-end; padding-bottom: 7vh }
+#gameover #goBg { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
+#gameover .box { position: relative; z-index: 1; backdrop-filter: none }
 #gameover .box { background: transparent; border: none; text-align: center }
-#gameover canvas { width: 100%; max-width: 720px; height: auto; display: block; margin: 0 auto 8px }
-#gameover .row { justify-content: center }
+#gameover .row { justify-content: center; gap: 12px }
 @keyframes goFade { from { opacity: 0 } to { opacity: 1 } }
 .end-title { text-align: center; font-size: 17px; color: #ffe39a; opacity: 1 !important }
 .c-pod { margin-top: 14px; padding: 8px 12px; border: 1px dashed rgba(127,255,170,.45); border-radius: 6px; color: #9ff0b0; opacity: 1 !important }

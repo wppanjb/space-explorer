@@ -147,12 +147,12 @@
 
   <!-- 结局：失败 -->
   <div id="gameover" class="overlay hidden">
+    <canvas id="goBg"></canvas>
     <div class="box">
-      <canvas id="goCanvas" width="720" height="240"></canvas>
       <h1>信号中断</h1>
       <p>飞船越过了不可回头点，在事件视界之内消失。没有回声，只有无尽的黑暗。</p>
-      <p class="hint">知识库、军衔、信用点保留；收藏、货舱和飞船升级随飞船一起消失。</p>
-      <div class="row"><button id="btnRestart">重新开始</button></div>
+      <p class="hint"></p>
+      <div class="row"><button id="btnGrounded">收藏</button><button id="btnNewFail">新的银河</button></div>
     </div>
   </div>
 
