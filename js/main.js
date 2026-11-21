@@ -10,7 +10,7 @@ import { mulberry32, makeRng, lerp } from './rng.js';
 import { genGalaxy, genBackground, genNebulae, genSystems, genPlanets, genStars } from './universe.js';
 import { genFragments, fragKind } from './story.js';
 import { byId, figPlanets } from './realsystems.js';
-import { beep } from './audio.js';
+import { beep, fanfare } from './audio.js';
 import { soft, disc, planetTexture, pointCloud } from './graphics.js';
 import { drawPlanetCard, drawSysPanorama } from './cards.js';
 import { T } from './text.js';
@@ -1295,7 +1295,7 @@ function promoTick() {   // 每帧检查：经验够了就弹出晋升（等收�
   const r = rankSeen, box = $('know').firstElementChild; box.classList.remove('lib'); box.classList.add('rich');
   box.innerHTML = H.promoHtml({ rank: r, rankName: RANKS[r].name, nextName: RANKS[r + 1]?.name, xp, need: RANK_NEED[r] || 0, lo: RANK_NEED[r - 1], sysXp: 0 });
   box.querySelectorAll('button').forEach(b => b.onclick = () => closePanel());
-  openPanel('know'); [660, 880, 1100, 1320].forEach((f, i) => beep(f, .2, 'triangle', .06, i * .08));
+  openPanel('know'); fanfare(r);   // 晋升号角：军衔越高越隆重
   setQuestTarget(); loaded.forEach(addStoryBeacon); doSave();
 }
 const DROP_XP = [0, 325, 800, 1550, 2700];   // 降到某军衔后的经验（下标 = 降级后的军衔：初/中/高/资深）
