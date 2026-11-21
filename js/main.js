@@ -535,9 +535,9 @@ let afterKnow = null;   // 关掉某个知识弹窗之后接着要做的事（�
 function closePanel() { if (openP === 'gameover' || (openP === 'quiz' && qzLocked())) return; const was = openP; if (openP) { panels[openP].classList.add('hidden'); openP = null } if ((was === 'know' || was === 'multi') && afterKnow) { const f = afterKnow; afterKnow = null; setTimeout(f, 250) } }
 
 // Toast & 卡片
-function toast(msg, cls = '') { const d = makeToast(msg, cls); setTimeout(() => d.remove(), Math.min(9000, 4300 + 40 * Math.max(0, msg.length - 40))) }   // 长消息多停一会儿
-function makeToast(msg, cls = '') {   // 做出一条提示但不自动消失（常驻提示用，自己负责 remove）
-  const d = document.createElement('div'); d.className = 'toast ' + cls; $('toasts').appendChild(d);
+function toast(msg, cls = '') { const ms = Math.min(9000, 4300 + 40 * Math.max(0, msg.length - 40)), d = makeToast(msg, cls); d.style.animationDuration = ms * .98 + 'ms'; setTimeout(() => d.remove(), ms) }   // CSS 淡出动画时长跟停留时间一致（原来固定 4.2s，长消息会先变透明再被移除）   // 长消息多停一会儿
+function makeToast(msg, cls = '', keep = false) {   // 做出一条提示但不自动消失（常驻提示用，自己负责 remove）
+  const d = document.createElement('div'); d.className = 'toast ' + cls + (keep ? ' keep' : ''); $('toasts').appendChild(d);
   msg.split('\n').forEach((line, i) => { if (i) d.appendChild(document.createElement('br')); line.split('**').forEach((seg, k) => { if (!seg) return; if (k % 2) { const b = document.createElement('b'); b.textContent = seg; d.appendChild(b) } else d.appendChild(document.createTextNode(seg)) }) });   // 消息里的换行（\n）显示成分行；两个 ** 之间的文字显示成粗体
   while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
   return d;
@@ -1043,7 +1043,7 @@ const bhAuthNote = () => bhDone || bhOn() ? '' : frags < FRAG_N ? `信号碎片�
 function bhWarnClear() { if (bhWarnEl) { bhWarnEl.remove(); bhWarnEl = null } }
 function bhWarnTick(d) {
   if (d >= BH_WARN_RESET) bhWarnArmed = true;
-  if (!bhWarnEl && bhWarnArmed && d < BH_WARN_ON && d > BH_WARN_OFF) { bhWarnArmed = false; bhWarnEl = makeToast(T.toast.tideEnter(BH_T.range, bhAuthNote()), 'warn'); beep(160, .25, 'sawtooth', .05) }
+  if (!bhWarnEl && bhWarnArmed && d < BH_WARN_ON && d > BH_WARN_OFF) { bhWarnArmed = false; bhWarnEl = makeToast(T.toast.tideEnter(BH_T.range, bhAuthNote()), 'warn', true); beep(160, .25, 'sawtooth', .05) }
   else if (bhWarnEl && (d <= BH_WARN_OFF || d >= BH_WARN_RESET)) bhWarnClear();
   else if (bhWarnEl && !bhWarnEl.isConnected) $('toasts').appendChild(bhWarnEl);   // 被别的提示挤掉了就放回去
 }

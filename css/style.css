@@ -44,6 +44,10 @@ canvas{display:block}
   animation:fade 4.2s forwards}
 .toast.good{border-color:#9dff9d;color:#d9ffd9}
 .toast.warn{border-color:#ff9d7a;color:#ffd9cc}
+.toast.warn b { color: #ff5f5f; font-size: 15px; }
+/* 常驻提示（潮汐警告）：只淡入，不淡出，由代码负责移除 */
+.toast.keep{animation:fadein .35s forwards}
+@keyframes fadein{0%{opacity:0;transform:translateY(-6px)}100%{opacity:1;transform:none}}
 @keyframes fade{0%{opacity:0;transform:translateY(-6px)}8%{opacity:1;transform:none}85%{opacity:1}100%{opacity:0}}
 #card{position:absolute;right:16px;top:110px;width:230px;line-height:1.7}
 @keyframes slide{from{opacity:0;transform:translateX(20px)}}

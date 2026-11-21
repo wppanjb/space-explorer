@@ -104,6 +104,7 @@
 
 /* 0.9.0 结局：不可回头点读数、失败画面、成功画面、培育舱 */
 #nogo { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); padding: 6px 16px; border: 1px solid rgba(255,90,70,.8); background: rgba(80,0,0,.55); color: #ff9a8a; font-weight: 600; letter-spacing: .08em; border-radius: 4px; animation: nogoBlink .8s infinite; pointer-events: none }
+#nogo .key-hint { font-size: 18px; font-weight: 800; color: #ffd54a; text-shadow: 0 0 6px rgba(255, 213, 74, .8); }
 @keyframes nogoBlink { 50% { opacity: .45 } }
 #gameover { background: #000; animation: goFade 2s ease both }
 #gameover .box { background: transparent; border: none; text-align: center }
