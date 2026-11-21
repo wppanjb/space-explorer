@@ -231,17 +231,18 @@ export const quizQHtml = d => `<div class="c-qz-top"><span class="c-qz-label">�
 export const quizFbHtml = d => `<div class="c-qz-fb-${d.ok ? 'ok' : 'bad'}"><b>${d.timeout ? T.quiz.timeUp : d.ok ? T.quiz.right : T.quiz.wrong}</b>${d.gain ? `<em>${T.quiz.gain(d.gain)}</em>` : ''}</div>${d.ok ? '' : `<p>${T.quiz.correctIs(d.ans)}</p>`}<p class="c-qz-exp">${d.exp}</p>`;
 export const quizResultHtml = d => `<h2>🎓 ${d.quit ? T.quiz.quitTitle : d.practice ? T.quiz.practiceTitle : T.quiz.resultTitle}</h2><p class="c-qz-score">${T.quiz.score(d.right, d.n)}</p>
   <p class="${d.gain ? 'c-qz-gain' : 'hint'}">${d.gain ? T.quiz.gained(d.gain) : d.practice ? T.quiz.noGain : ''}</p>${d.quit ? `<p class="hint">${T.quiz.quitNote}</p>` : ''}
+  ${d.tiers?.length ? `<div class="c-qz-tiers"><p>${T.quiz.tierReady}</p>${d.tiers.map(t => `<button class="primary" data-qt="${t.i}">${T.quiz.startTier(t.n, t.per)}</button>`).join('')}</div>` : ''}
   <div class="row c-qz-btns"><button id="qzDone">${T.quiz.done}</button><button id="qzAgain">${T.quiz.again}</button></div>`;
 /** 知识库里的「知识测验」页：d = { xp, avail, pool, tiers: [{ n, need, per, state: 'locked' | 'ready' | 'done' }] } */
 export const quizMenuHtml = d => { const M = T.quiz.menu; return `<div class="c-qm"><h2>🎓 ${T.quiz.title}</h2><p>${M.intro}</p>
   <p class="hint">${M.xp(d.xp)} · ${d.avail ? M.pool(d.pool, d.avail) : M.empty}</p><h4>${M.tiersHead}</h4>
-  ${d.tiers.map(t => `<div class="c-qm-row ${t.state}"><b>${M.tier(t.n)}</b><span>${M.per(t.per)}</span><i>${t.state === 'done' ? M.done : t.state === 'ready' ? '' : M.locked(t.need)}</i>${t.state === 'ready' && d.avail ? `<button data-qz="${t.n - 1}">${M.start}</button>` : ''}</div>`).join('')}
+  ${d.tiers.map(t => `<div class="c-qm-row ${t.state}"><b>${M.tier(t.n)}</b><span>${M.per(t.per)}</span><i>${t.state === 'done' ? M.done : t.state === 'ready' ? '' : M.locked(t)}</i>${t.state === 'ready' && d.avail ? `<button data-qz="${t.n - 1}">${M.start}</button>` : ''}</div>`).join('')}
   <p class="hint">${M.note}</p><h4>${M.practiceHead}</h4><p>${M.practiceNote}</p>${d.avail ? `<button data-qz="practice">${M.practice}</button>` : ''}</div>` };
 /** 范围扫描后的多张小卡片：items = [{ src, name, reward, isNew }] */
 export const multiHtml = items => `<h2>${T.multi.title(items.length)}</h2><p class="hint">${T.multi.hint}</p>
   <div class="c-mc-grid">${items.map((c, i) => `<div class="c-mc${c.isNew ? ' new' : ''}" data-i="${i}"><img src="${c.src}" alt="${c.name}"><div class="c-mc-name">${c.name}</div><div class="c-mc-r">${c.reward}</div></div>`).join('')}</div>
   <div class="row"><button id="multiOk">${T.ui.gotIt}</button></div>`;
-export const cardImgHtml = (src, alt) => `<img src="${src}" alt="${alt}">`;
+export const cardImgHtml = (src, alt, unsent) => `<img src="${src}" alt="${alt}"${unsent ? ' class="unsent"' : ''}>`;
 export const emptyHtml = para;
 
 // ---------- 新手教学 ----------

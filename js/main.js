@@ -64,6 +64,7 @@ const OLD_NEED = [100, 300, 500, 1000, 2000];     // 旧版（xpv 1）门槛，�
 const PLANET_XP = p => p.cat ? 25 : p.kind === 'rock' ? 8 : 12;   // 首次扫描行星：特别类别最多，岩石最少
 const XP = { unlock: 15, beacon: 8, frag: 100, bh: 300, pano: 10 };
 const rankOf = x => RANK_NEED.filter(n => x >= n).length;
+const sent = { cards: new Set(save?.sent?.cards || []), panos: { ...(save?.sent?.panos || {}) } };   // 已传回地球的收藏：行星卡编号；全景图 = 星系编号 → 传回时那张图的拍摄时间（重拍之后就算新的、没传回）。失败时只有这些会保留
 const panos = save?.panos || {};   // 星系全景图：星系编号 → { t 拍摄时间, ids 拍摄时已扫描的行星, star 主恒星是否已扫描 }
 const doneSys = new Set(save?.done ?? (save ? systems.filter(s => genPlanets(s).every(p => p.home || discovered.has(p.id))).map(s => s.i) : []));
 let xp = save?.xp ?? (save ? discovered.size * 10 + beaconsGot.size * 5 + frags * 50 + doneSys.size * 30 : 0);   // 旧存档按已有进度估算
@@ -95,7 +96,7 @@ function doSave() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       seed, credits, up, hull, cargo, sampled: [...sampled], discovered: [...discovered],
-      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, secret, quiz, xpSeen: [...xpSeen], panoGiven: [...panoGiven], frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
+      beacons: [...beaconsGot], visited: [...visited], probed: [...probed], ended: bhDone, secret, quiz, xpSeen: [...xpSeen], panoGiven: [...panoGiven], sent: { cards: [...sent.cards], panos: sent.panos }, frags, playTime, xp, xpv: 2, panos, rankSeen, done: [...doneSys],fuel, pos: ship.pos.toArray(), quat: ship.quat.toArray()
     }))
   } catch { }
 }
@@ -428,6 +429,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyP') shootPano();
   if (e.code === 'Tab') cycleTarget();
   if (e.code === 'KeyR') probeTarget();
+  if (!e.repeat && ((e.code === 'KeyG' && keys.KeyS) || (e.code === 'KeyS' && keys.KeyG)) && emergencyOK()) { emergencyWarp(); return }   // S + G 同时按：紧急曲速（只在奇点潮汐区内、不可回头点之前有效）
   if (e.code === 'KeyG') toggleWarp();
 });
 addEventListener('keyup', e => { keys[e.code] = false });
@@ -533,10 +535,12 @@ let afterKnow = null;   // 关掉某个知识弹窗之后接着要做的事（�
 function closePanel() { if (openP === 'gameover' || (openP === 'quiz' && qzLocked())) return; const was = openP; if (openP) { panels[openP].classList.add('hidden'); openP = null } if ((was === 'know' || was === 'multi') && afterKnow) { const f = afterKnow; afterKnow = null; setTimeout(f, 250) } }
 
 // Toast & 卡片
-function toast(msg, cls = '') {
-  const d = document.createElement('div'); d.className = 'toast ' + cls; d.textContent = msg; $('toasts').appendChild(d);
-  setTimeout(() => d.remove(), 4300);
+function toast(msg, cls = '') { const d = makeToast(msg, cls); setTimeout(() => d.remove(), Math.min(9000, 4300 + 40 * Math.max(0, msg.length - 40))) }   // 长消息多停一会儿
+function makeToast(msg, cls = '') {   // 做出一条提示但不自动消失（常驻提示用，自己负责 remove）
+  const d = document.createElement('div'); d.className = 'toast ' + cls; $('toasts').appendChild(d);
+  msg.split('\n').forEach((line, i) => { if (i) d.appendChild(document.createElement('br')); line.split('**').forEach((seg, k) => { if (!seg) return; if (k % 2) { const b = document.createElement('b'); b.textContent = seg; d.appendChild(b) } else d.appendChild(document.createTextNode(seg)) }) });   // 消息里的换行（\n）显示成分行；两个 ** 之间的文字显示成粗体
   while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
+  return d;
 }
 let cardTimer = 0;
 const cardCache = new Map();
@@ -550,7 +554,7 @@ function showBig(i) {
   bigI = (i + bigList.length) % bigList.length;
   const im = bigList[bigI];
   $('cardimg').src = im.src; $('cardDl').href = im.src; $('cardDl').download = im.alt + '.png';
-  $('cardIdx').textContent = T.cards.index(bigI + 1, bigList.length);
+  $('cardIdx').textContent = T.cards.index(bigI + 1, bigList.length) + ' · ' + (im.classList.contains('unsent') ? T.tx.tagUnsent : T.tx.tagSent);
   $('cardbig').classList.remove('hidden');
 }
 $('cardPrev').onclick = () => showBig(bigI - 1);
@@ -577,7 +581,14 @@ function starInfoLines(sys, st) {   // 全景图右上角的主恒星资料（�
   return lines;
 }
 function starTypeText(s) { return s.rid ? byId(s.rid).star.type + ' 型恒星' : s.cat === 'redGiant' ? T.sys.redGiant : T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] }
-function shootPano(si = curSysI, auto = false) {   // auto：扫完全部行星时自动拍一张（不闪白屏）
+// 拍摄全景图的范围：每个星系用自己的——最外圈行星的轨道 + 30 u，最小 110 u（外圈行星离恒星可能比 110 u 远，比如海王星约 164 u）
+const panoRange = s => Math.max(ENTER_R, genPlanets(s).reduce((m, p) => Math.max(m, p.dist), 0) + 30);
+function panoSysIdx() {   // 此刻在哪个星系的拍摄范围内（多个重叠时取离恒星最近的）；都不在 = -1
+  let bi = -1, bd = 1e9;
+  for (const s of systems) { const d = s.pos.distanceTo(ship.pos); if (d < 320 && d < bd && d <= panoRange(s)) { bd = d; bi = s.i } }
+  return bi;
+}
+function shootPano(si = panoSysIdx(), auto = false) {   // auto：扫完全部行星时自动拍一张（不闪白屏）
   if (si < 0) { toast(T.pano.noSys, 'warn'); return }
   const sys = systems[si], pl = genPlanets(sys), first = !panoGiven.has(String(sys.i));
   panos[sys.i] = { t: Date.now(), ids: pl.filter(p => p.home || discovered.has(p.id)).map(p => p.id) };
@@ -591,6 +602,45 @@ function shootPano(si = curSysI, auto = false) {   // auto：扫完全部行星�
   doSave();
   if (openP === 'cards') renderCards();
 }
+// ---- 传送回地球：把还没传回的收藏（行星卡、全景图）一次传完。离地球越远，越费燃料、每项越慢；传回的收藏在飞船失败后保留 ----
+let tx = null;   // { q: [{k:'c'|'p', id}], i, t, sec }：传送中；只在游戏运行时（没有打开面板）走时间
+const TX_SEC_MIN = 1, TX_SEC_MAX = 5, TX_FUEL_PER_U = .02;
+const unsentCards = () => [...discovered].filter(id => !sent.cards.has(id));
+const unsentPanos = () => Object.keys(panos).filter(k => sent.panos[k] !== panos[k].t).map(Number);
+function txInfo() {
+  const dist = ship.pos.distanceTo(systems[0].pos), nc = unsentCards().length, np = unsentPanos().length;
+  return { dist, nc, np, n: nc + np, sec: TX_SEC_MIN + (TX_SEC_MAX - TX_SEC_MIN) * Math.min(1, dist / GR), fuel: Math.max(2, Math.ceil(dist * TX_FUEL_PER_U)) };
+}
+function startTx() {
+  if (tx) return; const I = txInfo(); if (!I.n) return;
+  if (fuel < I.fuel) { toast(T.tx.noFuel(I.fuel, Math.floor(fuel)), 'warn'); return }
+  fuel -= I.fuel; tx = { q: [...unsentCards().map(id => ({ k: 'c', id })), ...unsentPanos().map(i => ({ k: 'p', id: i }))], i: 0, t: 0, sec: I.sec };
+  toast(T.tx.start(I.n, I.fuel, Math.round(I.n * I.sec)), 'good'); beep(520, .12, 'triangle', .04); doSave(); txHud(); renderTx();
+}
+function txTick(dt) {
+  if (!tx) return; tx.t += dt;
+  while (tx && tx.t >= tx.sec) {
+    tx.t -= tx.sec; const it = tx.q[tx.i++];
+    if (it.k === 'c') sent.cards.add(it.id); else if (panos[it.id]) sent.panos[it.id] = panos[it.id].t;
+    beep(1040, .05, 'square', .025);
+    if (tx.i >= tx.q.length) { const n = tx.q.length; tx = null; toast(T.tx.done(n), 'good'); beep(660, .12, 'triangle', .05); beep(990, .16, 'triangle', .05, .1) }
+    doSave();
+  }
+  txHud();
+}
+function txStop() { tx = null; txHud() }
+function txHud() {
+  let el = $('txhud'); if (!el) { el = document.createElement('div'); el.id = 'txhud'; el.className = 'c-txhud hidden'; el.innerHTML = '<span></span><i><b></b></i>'; document.body.appendChild(el) }
+  el.classList.toggle('hidden', !tx || !$('hud') || $('hud').classList.contains('hidden'));
+  if (tx) { el.firstChild.textContent = T.tx.hud(tx.i + 1, tx.q.length); el.querySelector('b').style.width = Math.min(100, tx.t / tx.sec * 100) + '%' }
+}
+function renderTx() {
+  const el = $('txbar'); if (!el) return;
+  if (tx) { el.innerHTML = `<span>${T.tx.busy(tx.i, tx.q.length)}</span>`; return }
+  const I = txInfo();
+  el.innerHTML = I.n ? `<span>${T.tx.unsent(I.nc, I.np)}</span><button id="txGo"${fuel < I.fuel ? ' class="low"' : ''}>${T.tx.go(I.fuel, Math.round(I.n * I.sec))}</button><span class="hint">${T.tx.legend}</span>` : `<span class="hint">${T.tx.allSent}</span>`;
+  const b = $('txGo'); if (b) b.onclick = e => { e.target.blur(); startTx() };
+}
 const PANO_MILE = { 5: 200, 10: 500, 20: 1000 };   // 收集到这么多个星系的全景图时，一次性奖励的信用点
 let cardTab = 'planets', panoSort = 'new';
 try { panoSort = localStorage.getItem('deepspace-panosort') === 'name' ? 'name' : 'new' } catch { }
@@ -598,17 +648,19 @@ try { panoSort = localStorage.getItem('deepspace-panosort') === 'name' ? 'name' 
   const box = $('cflt').parentElement; box.insertAdjacentHTML('beforebegin', `<div id="ctabs" class="c-ctabs"><button data-t="planets">${T.pano.tabPlanets}</button><button data-t="pano">${T.pano.tabPano}</button><button id="panoShot" class="c-shot">${T.pano.shoot}</button></div>`);
   $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.onclick = () => { cardTab = b.dataset.t; b.blur(); renderCards() });
   $('panoShot').onclick = e => { e.target.blur(); shootPano() };
+  $('ctabs').insertAdjacentHTML('afterend', '<div id="txbar" class="c-txbar"></div>');
   $('panoShot').insertAdjacentHTML('afterend', `<select id="panoSort" class="c-sort"><option value="new">${T.pano.sortNew}</option><option value="name">${T.pano.sortName}</option></select>`);
   $('panoSort').value = panoSort; $('panoSort').onchange = e => { panoSort = e.target.value; try { localStorage.setItem('deepspace-panosort', panoSort) } catch { } e.target.blur(); renderCards() };
 })();
 const panoOrder = () => Object.keys(panos).map(Number).sort(panoSort === 'name' ? (a, b) => systems[a].name.localeCompare(systems[b].name) : (a, b) => panos[b].t - panos[a].t || b - a);   // 默认最新的在最上面；也可按名字排
 function renderCards() {
+  renderTx();
   $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === cardTab));
   $('panoSort').style.display = cardTab === 'pano' ? '' : 'none';
   $('cflt').parentElement.style.display = cardTab === 'pano' ? 'none' : ''; $('cgrid').classList.toggle('pano', cardTab === 'pano');
   if (cardTab === 'pano') {
     const list = panoOrder();
-    $('cgrid').innerHTML = list.length ? list.map(i => H.cardImgHtml(panoURL(i), systems[i].name + ' 全景')).join('') : H.emptyHtml(T.pano.empty);
+    $('cgrid').innerHTML = list.length ? list.map(i => H.cardImgHtml(panoURL(i), systems[i].name + ' 全景', sent.panos[i] !== panos[i].t)).join('') : H.emptyHtml(T.pano.empty);
     const imgs = [...$('cgrid').querySelectorAll('img')]; imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) }); return;
   }
   // 出发点（地球）一开始就已知，卡片自动收藏，但不计入「已发现」的行星数
@@ -625,7 +677,7 @@ function renderCards() {
   const show = want === null ? ids : ids.filter(id => +id.split(':')[0] === want);
   $('cgrid').innerHTML = show.length ? show.map(id => {
     const [si, pi] = id.split(':').map(Number), p = genPlanets(systems[si])[pi];
-    return H.cardImgHtml(cardURL(p), p.name)
+    return H.cardImgHtml(cardURL(p), p.name, !homeIds.includes(id) && !sent.cards.has(id))
   }).join('') : H.emptyHtml(want === null ? T.cards.emptyAll : want === -1 ? T.cards.emptyNoSys : T.cards.emptySys);
   const imgs = [...$('cgrid').querySelectorAll('img')];
   imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) });
@@ -701,19 +753,19 @@ function cycleTarget() {
 const ARRIVE = 90;
 function warpCost(t) { return Math.max(2, (t.pos.distanceTo(ship.pos) - ARRIVE) * .12) }
 function toggleWarp() {
-  if (warp) { endWarp(false); return }
+  if (warp) { if (!warp.emergency) endWarp(false); return }   // 紧急曲速取消不了
   if (!target) { toast(T.toast.warpNoTarget, 'warn'); return }
   const d = target.pos.distanceTo(ship.pos);
   if (d < ARRIVE + 30) { toast(T.toast.warpNear); return }
   const cost = warpCost(target);
   if (fuel < cost) { toast(T.toast.warpNoFuel(cost.toFixed(0), fuel.toFixed(0)), 'warn'); return }
-  fuel -= cost; warp = { target, arrive: ARRIVE }; beep(220, .5, 'sawtooth', .04); toast(T.toast.warpStart(target.name, cost.toFixed(0)));
+  fuel -= cost; warp = { target, arrive: ARRIVE, s: 0 }; warp.plan = warpPlan(target); beep(220, .5, 'sawtooth', .04); toast(T.toast.warpStart(target.name, cost.toFixed(0)));
 }
 function endWarp(arrived) {
   if (!warp) return;
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat);
   ship.vel.copy(fwd).multiplyScalar(arrived ? 20 : Math.min(ship.vel.length(), maxSpeed()));
-  if (arrived) { toast(T.toast.warpArrive(warp.target.name), 'good'); beep(520, .2); if (target === warp.target) target = null }
+  if (arrived) { toast(warp.emergency ? T.toast.emgArrive : T.toast.warpArrive(warp.target.name), 'good'); beep(520, .2); if (target === warp.target) target = null }
   warp = null;
 }
 
@@ -765,7 +817,7 @@ function renderMapBar() {
 const BH_SYS = { i: -1, name: T.map.bh, pos: new THREE.Vector3(0, 0, 0) };
 const qV = new THREE.Vector3();
 function setQuestTarget() {
-  const n = qOn() ? systems[fragSys[frags]] : (bhOn() ? BH_SYS : null);
+  const n = qOn() ? systems[fragSys[frags]] : null;   // 奇点不设为目标：让玩家自己飞过去（任务面板和星图照样给方向和距离）
   target = (n && n.pos.distanceTo(ship.pos) > (n.i >= 0 ? 260 : 150)) ? n : null;
 }
 function questText() {
@@ -984,20 +1036,32 @@ const FALL_R = 40, NOGO_SHOW = 110;       // 不可回头点半径（越过就�
 let falling = null, alarmCd = 0;
 const TIDE_R = 160;                      // 潮汐区半径：进入后被拉向奇点、船体持续受损
 let tideDepth = 0, inTide = false;       // 0（区外）~ 1（奇点中心）
+// 奇点警告：靠近到 BH_WARN_ON 以内就弹出，一直显示到进入 BH_WARN_OFF 以内（飞远到 BH_WARN_RESET 以外才会重置，下次靠近再弹）；没授权的话末尾多提醒一句（只提醒，不阻止）
+const BH_WARN_ON = 190, BH_WARN_OFF = 130, BH_WARN_RESET = 200;
+let bhWarnEl = null, bhWarnArmed = true;   // armed：飞远到 BH_WARN_RESET 以外之后，下次靠近才再弹
+const bhAuthNote = () => bhDone || bhOn() ? '' : frags < FRAG_N ? `信号碎片还差 ${FRAG_N - frags} 块` : `军衔不足，需要「${RANKS[5].name}」`;
+function bhWarnClear() { if (bhWarnEl) { bhWarnEl.remove(); bhWarnEl = null } }
+function bhWarnTick(d) {
+  if (d >= BH_WARN_RESET) bhWarnArmed = true;
+  if (!bhWarnEl && bhWarnArmed && d < BH_WARN_ON && d > BH_WARN_OFF) { bhWarnArmed = false; bhWarnEl = makeToast(T.toast.tideEnter(BH_T.range, bhAuthNote()), 'warn'); beep(160, .25, 'sawtooth', .05) }
+  else if (bhWarnEl && (d <= BH_WARN_OFF || d >= BH_WARN_RESET)) bhWarnClear();
+  else if (bhWarnEl && !bhWarnEl.isConnected) $('toasts').appendChild(bhWarnEl);   // 被别的提示挤掉了就放回去
+}
 function tide(dt) {
   const d = ship.pos.distanceTo(bh.position);
+  bhWarnTick(d);
   tideDepth = d < TIDE_R ? 1 - d / TIDE_R : 0;
   if (tideDepth > 0) {
     tV.copy(bh.position).sub(ship.pos).normalize();
     ship.pos.addScaledVector(tV, 30 * tideDepth * tideDepth * dt);        // 拉力：越近越强（不推进的话扫描到一半就会被拖过不可回头点）
     hull = Math.max(0, hull - (1.5 + 5 * tideDepth * tideDepth) * dt);    // 船体持续受损
-    if (!inTide) { inTide = true; toast(T.toast.tideEnter(BH_T.range), 'warn'); beep(100, .4, 'sawtooth', .06) }
+    if (!inTide) { inTide = true; beep(100, .4, 'sawtooth', .06) }
   } else if (inTide && d > TIDE_R * 1.05) inTide = false;
   // 不可回头点：第二段警告 = HUD 距离读数 + 越近越急的警报；越过就无法脱离
   const nogo = $('nogo');
   if (d < NOGO_SHOW) {
     const k = Math.max(0, (d - FALL_R) / (NOGO_SHOW - FALL_R));
-    nogo.classList.remove('hidden'); nogo.textContent = T.toast.nogoDist(Math.max(0, d - FALL_R).toFixed(0));
+    nogo.classList.remove('hidden'); nogo.innerHTML = T.toast.nogoDist(Math.max(0, d - FALL_R).toFixed(0)) + (d > FALL_R && !falling && !warp ? '<br><small>' + T.toast.emgHint + '</small>' : '');   // 距离读数旁边一起提示紧急曲速
     alarmCd -= dt; if (alarmCd <= 0) { beep(330 + 300 * (1 - k), .1, 'square', .05); alarmCd = .2 + 1.3 * k }
   } else nogo.classList.add('hidden');
   if (d < FALL_R) startFall();
@@ -1029,11 +1093,23 @@ function drawFailArt() {   // 无尽的黑暗里，一艘小飞船静静漂浮�
   g.fillStyle = 'rgba(127,212,255,.7)'; g.beginPath(); g.ellipse(8, 0, 7, 3, 0, 0, 7); g.fill();   // 驾驶舱的一点微光
   g.restore();
 }
-function showFail() {   // 失败：知识库、军衔、信用点保留；收藏、货舱和飞船升级随飞船一起消失
+// ---- 紧急曲速：在奇点潮汐区内、不可回头点之前，同时按 S + G：耗尽燃料、能量、货舱，飞船升级归零，船体降到 20%，立刻曲速回家园星系（可以无限次，代价很重） ----
+function emergencyOK() { if (!running || paused() || falling || warp?.emergency) return false; const d = ship.pos.distanceTo(bh.position); return d < TIDE_R && d > FALL_R }
+function emergencyWarp() {
+  if (warp) endWarp(false);
+  fuel = 0; energy = 0; for (const k of Object.keys(cargo)) delete cargo[k]; for (const k of Object.keys(up)) up[k] = 0; hull = Math.min(hull, HULL_MAX * .2);
+  flare = null; inBelt = false; tideDepth = 0; inTide = false; scanT = 0; mouseHeld = false; target = null; $('nogo').classList.add('hidden');
+  const home = systems[0]; warp = { target: home, arrive: ARRIVE, s: 0, emergency: true }; warp.plan = warpPlan(home);
+  toast(T.toast.emgStart, 'warn'); beep(220, .5, 'sawtooth', .05); beep(440, .3, 'sawtooth', .04, .15); doSave();
+}
+function showFail() {   // 失败：知识库、军衔、信用点和已传回地球的收藏保留；没传回的收藏、货舱和飞船升级随飞船一起消失
   falling = null; const cv = renderer.domElement.style; cv.filter = cv.transform = cv.opacity = ''; $('nogo').classList.add('hidden');
   for (const k of Object.keys(cargo)) delete cargo[k];
   for (const k of Object.keys(up)) up[k] = 0;   // 飞船升级也随飞船一起消失
-  discovered.clear(); sampled.clear(); for (const k of Object.keys(panos)) delete panos[k]; cardCache.clear();
+  const keepC = [...discovered].filter(id => sent.cards.has(id)), keepP = Object.keys(panos).filter(k => sent.panos[k] === panos[k].t);   // 已传回地球的收藏保留，没传回的随飞船消失
+  discovered.clear(); keepC.forEach(id => discovered.add(id)); sampled.clear(); for (const k of Object.keys(panos)) if (!keepP.includes(k)) delete panos[k];
+  sent.cards = new Set(keepC); for (const k of Object.keys(sent.panos)) if (!keepP.includes(k)) delete sent.panos[k];
+  cardCache.clear(); txStop(); { const h = document.querySelector('#gameover .hint'); if (h) h.textContent = T.tx.failKept(keepC.length, keepP.length) }
   hull = HULL_MAX; fuel = fuelMax(); energy = energyMax(); flare = null; inBelt = false; tideDepth = 0; inTide = false; scanT = 0; target = null;
   const best = homeSpot(), h = systems[0];
   ship.pos.copy(best); ship.vel.set(0, 0, 0); ship.quat.setFromRotationMatrix(new THREE.Matrix4().lookAt(best, h.pos, UP)); warp = null;
@@ -1064,7 +1140,7 @@ function welcomeTick() {   // 第一个移动教学完成（或教学已关闭�
 // =====================================================================
 // 知识测验：完成星系后，经验够了就邀请答题（真实天文知识，题目从已解锁的知识库条目里抽）
 // =====================================================================
-const QUIZ_TIERS = [{ xp: 900, per: 20 }, { xp: 1500, per: 30 }, { xp: 3000, per: 50 }];   // 经验超过 xp 后，完成一个星系时弹出邀请；答对一题加 per 经验
+const QUIZ_TIERS = [{ xp: 900, kn: 8, per: 20 }, { xp: 1500, kn: 16, per: 30 }, { xp: 3000, kn: 24, per: 50 }];   // 经验超过 xp、并且已解锁 kn 个有题的知识条目后，完成一个星系时弹出邀请；答对一题加 per 经验
 const QUIZ_N = 5, QUIZ_SEC = 20;                                                          // 每次 5 题，每题限时 20 秒
 const quiz = { offered: [...(save?.quiz?.offered || [])], used: [...(save?.quiz?.used || [])] };   // offered：邀请弹过的档位；used：已经按过「开始」的档位（只有第一次能加经验）
 let quizCheck = false, qz = null;   // quizCheck：刚完成一个星系，等界面都空了再检查；qz：当前的一次答题
@@ -1072,30 +1148,35 @@ const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.f
 const quizPool = () => [...libSet].filter(k => BANK[k]);                                  // 已解锁、并且有题的条目
 const quizAvail = () => quizPool().reduce((n, k) => n + BANK[k].length, 0);
 const qzLocked = () => !!(qz && qz.started && !qz.done);                                  // 答题进行中：锁住所有其他面板和按键
-const tierReady = t => xp > QUIZ_TIERS[t].xp && !quiz.used.includes(t);                   // 经验够了、还没答过
+// 每一档的题目范围：按玩家解锁的先后顺序，第 1 档 = 第 1～8 个条目，第 2 档 = 第 9～16 个，第 3 档 = 第 17 个起的全部（libSet 存在 localStorage，新建宇宙也不会变）
+const tierKeys = t => quizPool().slice(t ? QUIZ_TIERS[t - 1].kn : 0, t === QUIZ_TIERS.length - 1 ? undefined : QUIZ_TIERS[t].kn);   // 最后一档一直到最后一个，题库全部都会用到
+const tierReady = t => xp > QUIZ_TIERS[t].xp && quizPool().length >= QUIZ_TIERS[t].kn && !quiz.used.includes(t);   // 经验够、知识够、还没答过
+// 练习：只从还没答过的档位的范围里抽（已答过的档位的条目不再练）；全答过了就从所有已解锁条目里抽
+const practiceKeys = () => { const done = new Set(quiz.used.flatMap(tierKeys)), ks = quizPool().filter(k => !done.has(k)); return ks.reduce((n, k) => n + BANK[k].length, 0) >= QUIZ_N ? ks : quizPool() };   // 剩下的题不够一轮（例如档位全答过了）就从所有已解锁条目里抽
 function quizTick() {   // 每帧检查：刚完成星系 → 等晋升、收藏、全景图、卡片都收完之后，按经验弹出邀请
   if (!quizCheck || !running || openP || cardHold || collectPending || warp || rankTarget() > rankSeen || !$('card').classList.contains('hidden') || !$('cardbig').classList.contains('hidden')) return;
   quizCheck = false;
   const t = QUIZ_TIERS.findIndex((_, i) => !quiz.offered.includes(i) && tierReady(i));
-  if (t < 0 || !quizAvail()) return;
+  if (t < 0) return;
   quiz.offered.push(t); doSave(); showQuizOffer(t);
 }
-function drawQuiz() {   // 抽 5 题：尽量每个条目一题，不够再从同一批条目里补
-  const keys = shuffle(quizPool()), qs = [];
-  for (const k of keys) { if (qs.length >= QUIZ_N) break; qs.push([k, BANK[k][Math.floor(Math.random() * BANK[k].length)]]) }
-  if (qs.length < QUIZ_N) { const rest = shuffle(keys.flatMap(k => BANK[k].map(q => [k, q])).filter(x => !qs.some(y => y[1] === x[1]))); while (qs.length < QUIZ_N && rest.length) qs.push(rest.pop()) }
-  return qs.map(([key, q]) => { const opts = shuffle([q[1], q[2], q[3], q[4]]); return { key, q: q[0], opts, ans: opts.indexOf(q[1]), exp: q[5] } });
+function drawQuiz(keys) {   // 从给定的条目里抽 5 题：尽量每个条目一题，不够再从同一批条目里补
+  const all = shuffle(keys.flatMap(k => BANK[k].map((q, i) => ({ key: k, q })))), qs = [], seen = new Set();
+  for (const x of shuffle(all)) if (qs.length < QUIZ_N && !seen.has(x.key)) { seen.add(x.key); qs.push(x) }
+  for (const x of all) if (qs.length < QUIZ_N && !qs.includes(x)) qs.push(x);
+  return qs.map(({ key, q }) => { const opts = shuffle([q[1], q[2], q[3], q[4]]); return { key, q: q[0], opts, ans: opts.indexOf(q[1]), exp: q[5] } });
 }
 function showQuizOffer(t) {
   qz = { tier: t, started: false, done: false };
-  $('quiz').firstElementChild.innerHTML = H.quizOfferHtml({ n: t + 1, per: QUIZ_TIERS[t].per, count: Math.min(QUIZ_N, quizAvail()), sec: QUIZ_SEC });
+  $('quiz').firstElementChild.innerHTML = H.quizOfferHtml({ n: t + 1, per: QUIZ_TIERS[t].per, count: QUIZ_N, sec: QUIZ_SEC });
   $('qzStart').onclick = () => startQuiz(t);
   $('qzReview').onclick = () => { closePanel(); libCur = '__quiz'; openPanel('lib') };   // 去知识库复习；测验一直等着，知识库里随时可以开始
   $('qzSkip').onclick = () => closePanel();
   openPanel('quiz'); [660, 880].forEach((f, i) => beep(f, .15, 'triangle', .05, i * .1));
 }
 function startQuiz(t) {   // t：档位序号；null 或已经答过的档位 = 练习（不加经验）
-  const tier = t != null && !quiz.used.includes(t) ? t : null, qs = drawQuiz();
+  const tier = t != null && tierReady(t) ? t : null;
+  const qs = drawQuiz(tier != null ? tierKeys(tier) : practiceKeys());
   if (!qs.length) { toast(T.quiz.noPool, 'warn'); return }
   if (tier != null) { quiz.used.push(tier); if (!quiz.offered.includes(tier)) quiz.offered.push(tier); doSave() }   // 按下「开始」就用掉这一档的机会：之后再答都是练习
   qz = { tier, per: tier != null ? QUIZ_TIERS[tier].per : 0, qs, i: 0, right: 0, gain: 0, started: true, done: false, answered: false, timer: 0, deadline: 0 };
@@ -1128,7 +1209,9 @@ function answerQuiz(i) {
 function nextQuiz() { if (!qz || !qz.answered || qz.done) return; qz.i++; if (qz.i >= qz.qs.length) finishQuiz(false); else showQuizQ() }
 function finishQuiz(quit) {   // quit：中途放弃（答对的已经加了经验，没答的不算）
   if (!qz || qz.done) return; qz.done = true; clearInterval(qz.timer);
-  $('quiz').firstElementChild.innerHTML = H.quizResultHtml({ quit, right: qz.right, n: qz.qs.length, gain: qz.gain, practice: !qz.per, answered: qz.i + (qz.answered ? 1 : 0) });
+  $('quiz').firstElementChild.innerHTML = H.quizResultHtml({ quit, right: qz.right, n: qz.qs.length, gain: qz.gain, practice: !qz.per, answered: qz.i + (qz.answered ? 1 : 0),
+    tiers: !qz.per && quizAvail() ? QUIZ_TIERS.map((t, i) => ({ i, n: i + 1, per: t.per })).filter(t => tierReady(t.i)) : [] });   // 练习结束：如果有符合条件的档位，直接让玩家选择答题
+  $('quiz').querySelectorAll('[data-qt]').forEach(b => b.onclick = () => startQuiz(+b.dataset.qt));
   $('qzDone').onclick = () => closePanel();
   $('qzAgain').onclick = () => startQuiz(null);
   if (qz.gain) [660, 880, 1100].forEach((f, i) => beep(f, .15, 'triangle', .05, i * .08));
@@ -1141,7 +1224,7 @@ function quizKey(e) {   // 测验面板打开时的按键：1～4 / A～D 选答
   if (go) nextQuiz();
 }
 function renderQuizMenu() {   // 知识库里的「知识测验」页：待答的档位、练习
-  return H.quizMenuHtml({ xp, avail: quizAvail(), pool: quizPool().length, tiers: QUIZ_TIERS.map((t, i) => ({ n: i + 1, need: t.xp, per: t.per, state: quiz.used.includes(i) ? 'done' : tierReady(i) ? 'ready' : 'locked' })) });
+  return H.quizMenuHtml({ xp, avail: quizAvail(), pool: quizPool().length, tiers: QUIZ_TIERS.map((t, i) => ({ n: i + 1, need: t.xp, kn: t.kn, xpOk: xp > t.xp, knOk: quizPool().length >= t.kn, per: t.per, state: quiz.used.includes(i) ? 'done' : tierReady(i) ? 'ready' : 'locked' })) });
 }
 
 function promoTick() {   // 每帧检查：经验够了就弹出晋升（等收藏、卡片、其他面板都关了之后）
@@ -1161,6 +1244,7 @@ function demote() {   // 被强制送回家园：降一级（最低初级），�
   setQuestTarget();
 }
 function hazards(dt) {
+  if (bhWarnEl && (warp || falling || hull <= 0 || rank() < 1)) bhWarnClear();
   if (rank() < 1) { tideDepth = 0; flare = null; inBelt = false; meltDepth = 0; return }   // 实习生：没有危险
   if (warp) { tideDepth = 0; meltDepth = 0; return }
   if (falling) { fallTick(dt); return }
@@ -1261,6 +1345,96 @@ const tV = new THREE.Vector3(), tV2 = new THREE.Vector3(), tV3 = new THREE.Vecto
   tE = new THREE.Euler(), tM = new THREE.Matrix4(), inp = new THREE.Vector3();
 let boostLock = false, saveTimer = 0, wr = 0, scooping = false;
 
+// ---- 曲速航线：出发时规划一次，沿着一条平滑的曲线飞 ----
+// 1) 把恒星、行星（目标星系的行星按初始相位算）、奇点潮汐区都当作球，沿「起点 → 终点」检查，哪里被挡就在球的外侧插一个绕行点（离球远一些，弧线大一些）；
+// 2) 用 Catmull-Rom 曲线把起点、绕行点、终点连起来，再按弧长取样；
+// 3) 按「加速度限制 + 弯道限速 + 接近时减速」算出每一点的速度，飞行时只是沿着这条曲线走。
+const wsE = new THREE.Euler(), wsC = new THREE.Vector3();
+const WARP_VMAX = 900, WARP_ACC = 520, WARP_DEC = 420, WARP_LAT = 1500;   // 最高速 / 起步加速度 / 减速度 / 弯道最大侧向加速度（u/s，u/s²）
+const WARP_ARR_ELEV = 30 * Math.PI / 180, WARP_FACE = 250, warpF = new THREE.Vector3();   // 曲速终点：停在恒星斜上方 30°（不在行星轨道面上，能看到行星离得有一段距离）；最后 250 u 船头慢慢转向恒星
+const WARP_TURN = 2.4;                                                  // 船头最快的转动速度（弧度/秒，约 137°/秒）
+const WARP_GAP = 100;                                                  // 越过天体时离它（碰撞半径之外）至少多高 / 多远
+function warpObstacles(t, fn) {              // fn(球心, 碰撞半径, 是否奇点, 是否行星, 是否目标星系的行星)；目标星系自己的恒星不算（曲速本来就停在 ARRIVE 之外）
+  const seen = new Set(loaded.map(L => L.sys.i));
+  for (const L of loaded) if (L.sys !== t) for (const s of L.stars) fn(wsC.copy(s.mesh.position).add(L.sys.pos), s.st.radius * 1.5 + 2);
+  for (const sys of systems) {
+    if (sys === t || seen.has(sys.i) || sys.pos.distanceToSquared(ship.pos) > 1400 * 1400) continue;
+    for (const st of genStars(sys)) fn(wsC.set(Math.cos(st.phase) * st.orbitR, 0, Math.sin(st.phase) * st.orbitR).add(sys.pos), st.radius * 1.5 + 2)
+  }
+  for (const L of loaded) for (const pl of L.planets) { if (!pl.show) continue; pl.mesh.getWorldPosition(wsC); fn(wsC, pl.p.radius * 4 + 10, false, true, L.sys === t) }
+  if (!loaded.some(L => L.sys === t)) for (const p of genPlanets(t)) {   // 目标星系还没加载：行星按初始相位算位置（加载后就是这个位置）
+    orbitPos(p, solveE(p.phase, p.ecc), wsC); wsC.applyEuler(wsE.set(p.inc, p.node, 0, 'YXZ')).add(t.pos); fn(wsC, p.radius * 4 + 10, false, true, true)
+  }
+  fn(wsC.copy(bh.position), TIDE_R, true);   // 奇点的潮汐区
+}
+function segMin(a, b, c) {   // 线段 ab 上离点 c 最近的点：{u: 位置(0~1), q: 点, dist}
+  const d = b.clone().sub(a), l2 = d.lengthSq(), u = l2 ? Math.max(0, Math.min(1, c.clone().sub(a).dot(d) / l2)) : 0, q = a.clone().addScaledVector(d, u);
+  return { u, q, dist: q.distanceTo(c) };
+}
+function warpPlan(t) {
+  // 垂直绕飞：银河是一张薄盘，恒星、行星、奇点几乎都在同一个水平面上，所以水平方向保持直线，遇到挡路的天体就把高度抬起来（或压下去）从它上方（下方）越过。
+  // 1) 沿「起点 → 终点」的直线取样，算出每个位置为了离开天体（碰撞半径 + WARP_GAP）至少要抬高多少；
+  // 2) 先把抬高量“放宽”再“平均”（窗口相同，结果一定不低于要求），得到平缓的拱形；
+  // 3) 往上还是往下：看飞船相对挡路天体在上还是在下，靠哪边近就走哪边。
+  const A = ship.pos.clone(), T = t.pos, obs = [];
+  warpObstacles(t, (c, r, hard, planet, tgt) => obs.push({ c: c.clone(), r, hard: !!hard, planet: !!planet, tgt: !!tgt }));
+  const dA0 = A.clone().sub(T), hz = Math.hypot(dA0.x, dA0.z), el = Math.max(WARP_ARR_ELEV, Math.atan2(dA0.y, hz)), ce = Math.cos(el);   // 终点：恒星斜上方（方位还是从来的那一侧，仰角至少 30°）
+  const E = T.clone().add(new THREE.Vector3(hz > 1e-3 ? dA0.x / hz * ce : ce, Math.sin(el), hz > 1e-3 ? dA0.z / hz * ce : 0).multiplyScalar(ARRIVE)), L0 = A.distanceTo(E), N0 = Math.max(8, Math.ceil(L0 / 8)), ds0 = L0 / N0;
+  const os = [];
+  for (const o of obs) {
+    if (o.tgt) continue;                                            // 目标星系的行星：终点就在它们中间，不管
+    const dA = A.distanceTo(o.c), dE = E.distanceTo(o.c);
+    if (o.planet && dA < o.r + WARP_GAP) continue;                  // 起点就在这颗行星附近：不管（碰撞检测兜底）
+    const R = Math.min(o.r + WARP_GAP, dA - 2, dE - 2);             // 起点/终点已经贴着圈：圈缩小，保证起终点在圈外
+    if (R >= o.r + 15) os.push({ c: o.c, R, r: o.r });
+    else if (o.hard && dA < o.r && R >= 30) os.push({ c: o.c, R, r: Math.max(0, R - 25) });   // 起点在奇点潮汐区里（例如紧急曲速）：从奇点上方（下方）越过，不穿过奇点
+  }
+  const base = i => A.clone().lerp(E, i / N0), basePts = Array.from({ length: N0 + 1 }, (_, i) => base(i));
+  const need = new Float64Array(N0 + 1).fill(-Infinity), needD = new Float64Array(N0 + 1).fill(Infinity), blocking = [];
+  for (const o of os) {
+    let hit = false;
+    basePts.forEach((q, i) => { const dxz = Math.hypot(q.x - o.c.x, q.z - o.c.z); if (dxz < o.R) { const h = Math.sqrt(o.R * o.R - dxz * dxz); need[i] = Math.max(need[i], o.c.y + h); needD[i] = Math.min(needD[i], o.c.y - h); hit = true } });
+    if (hit) blocking.push(o);
+  }
+  let sigma = 1;   // +1 向上，-1 向下
+  if (blocking.length) {
+    const d = A.y - blocking.reduce((a, o) => a + o.c.y, 0) / blocking.length;
+    sigma = Math.abs(d) < 1.5 ? (new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat).y >= 0 ? 1 : -1) : d > 0 ? 1 : -1;
+  }
+  const lift = new Float64Array(N0 + 1);   // σ 方向上需要抬高多少（>=0）
+  for (let i = 0; i <= N0; i++) lift[i] = blocking.length ? Math.max(0, sigma > 0 ? need[i] - basePts[i].y : basePts[i].y - needD[i]) : 0;
+  const H = Math.max(0, ...lift), w = Math.max(1, Math.round(Math.max(150, Math.min(450, 1.5 * H)) / ds0));
+  const ramp = Math.max(60, Math.min(400, L0 * .3));   // 两端渐入渐出的长度
+  const smooth = lf => {
+    const dil = new Float64Array(N0 + 1), out = new Float64Array(N0 + 1);
+    for (let i = 0; i <= N0; i++) { let m = 0; for (let j = Math.max(0, i - w); j <= Math.min(N0, i + w); j++) m = Math.max(m, lf[j]); dil[i] = m }
+    for (let i = 0; i <= N0; i++) { let sum = 0, c = 0; for (let j = i - w; j <= i + w; j++) { sum += dil[Math.max(0, Math.min(N0, j))]; c++ } out[i] = sum / c }
+    for (let i = 0; i <= N0; i++) { const e = Math.min(i, N0 - i) * ds0 / ramp, k = Math.min(1, e); out[i] *= k * k * (3 - 2 * k) }   // 两端渐入，起点终点不突然拔高
+    return out;
+  };
+  const sm0 = smooth(lift);
+  const clearance = ys => { let m = Infinity; for (const o of os) for (let i = 0; i <= N0; i++) { const q = basePts[i], d = Math.hypot(q.x - o.c.x, q.z - o.c.z, q.y + sigma * ys[i] - o.c.y) - o.r; if (d < m) m = d } return m };
+  let mult = 1, ok = true, sm = sm0;
+  if (blocking.length) {   // 万一没抬够（两端渐入等造成）：整体再抬高一点重来
+    for (let it = 0; it < 4; it++) { sm = sm0.map(v => v * mult); if (clearance(sm) >= 20) break; mult *= 1.3; if (it === 3) { ok = false; sm = sm0.map(v => v * mult) } }
+  }
+  const poly = basePts.map((q, i) => new THREE.Vector3(q.x, q.y + sigma * sm[i], q.z));
+  // 按弧长重新取样（拱形让路径变长了一点）
+  const cum = [0]; for (let i = 1; i < poly.length; i++) cum.push(cum[i - 1] + poly[i].distanceTo(poly[i - 1]));
+  const L = cum[cum.length - 1], N = Math.max(8, Math.ceil(L / 8)), sp = []; let k = 0;
+  for (let i = 0; i <= N; i++) { const d = L * i / N; while (k < cum.length - 2 && cum[k + 1] < d) k++; const f = (d - cum[k]) / Math.max(1e-6, cum[k + 1] - cum[k]); sp.push(poly[k].clone().lerp(poly[k + 1], Math.min(1, f))) }
+  const best = { pts: sp, L, N, ds: L / N, wp: [A, E], scale: 1, ok, found: true, sigma, lift: Math.round(Math.max(...sm)) };
+  const P = best, v = new Float32Array(P.N + 1), tan = [];
+  for (let i = 0; i <= P.N; i++) tan.push(P.pts[Math.min(P.N, i + 1)].clone().sub(P.pts[Math.max(0, i - 1)]).normalize());
+  for (let i = 0; i <= P.N; i++) {   // 弯道限速：曲率越大越慢
+    const k = i && i < P.N ? Math.acos(Math.max(-1, Math.min(1, tan[i - 1].dot(tan[i + 1])))) / (2 * P.ds) : 0;
+    v[i] = Math.min(WARP_VMAX, Math.sqrt(WARP_LAT / Math.max(k, 1e-6)));
+  }
+  v[0] = Math.min(v[0], 30); v[P.N] = Math.min(v[P.N], 25);
+  for (let i = 1; i <= P.N; i++) v[i] = Math.min(v[i], Math.sqrt(v[i - 1] * v[i - 1] + 2 * WARP_ACC * P.ds));   // 加速度限制（向前）
+  for (let i = P.N - 1; i >= 0; i--) v[i] = Math.min(v[i], Math.sqrt(v[i + 1] * v[i + 1] + 2 * WARP_DEC * P.ds));   // 减速度限制（向后）
+  P.v = v; P.tan = tan; return P;
+}
 function update(dt) {
   // ---- 转向 ----
   const k = keys, rollIn = (k.KeyE ? 1 : 0) - (k.KeyQ ? 1 : 0), yawIn = (k.ArrowLeft ? 1 : 0) - (k.ArrowRight ? 1 : 0), pitchIn = (k.ArrowUp ? 1 : 0) - (k.ArrowDown ? 1 : 0);
@@ -1274,15 +1448,20 @@ function update(dt) {
 
   // ---- 移动 ----
   if (warp) {
-    const t = warp.target; tV.copy(t.pos).sub(ship.pos); const dist = tV.length(); tV.normalize();
-    tM.lookAt(ship.pos, t.pos, UP); tQ.setFromRotationMatrix(tM); ship.quat.slerp(tQ, 1 - Math.exp(-dt * 2.5));
+    // 沿着出发时规划好的曲线飞：s = 已飞过的弧长；速度取自预先算好的速度曲线；船头还没对准曲线时先原地等一等（起步转向）
+    const P = warp.plan, fi = Math.min(P.N - 1e-6, warp.s / P.ds), i0 = Math.floor(fi), f = fi - i0;
+    tV.copy(P.tan[i0]).lerp(P.tan[i0 + 1], f).normalize();   // 这一点的前进方向
+    const bf = Math.max(0, Math.min(1, 1 - (P.L - warp.s) / WARP_FACE)), bs = bf * bf * (3 - 2 * bf);   // 快到了：船头从行进方向慢慢转向恒星
+    warpF.copy(warp.target.pos).sub(ship.pos).normalize().multiplyScalar(bs).addScaledVector(tV, 1 - bs).normalize();
+    tM.lookAt(ship.pos, tV2.copy(ship.pos).add(warpF), UP); tQ.setFromRotationMatrix(tM); ship.quat.rotateTowards(tQ, Math.min(WARP_TURN * dt, ship.quat.angleTo(tQ) * (1 - Math.exp(-dt * 4))));   // 船头转向：先缓后快，且角速度有上限，起步不会猛甩
     tV2.set(0, 0, -1).applyQuaternion(ship.quat);
-    const align = Math.max(0, tV2.dot(tV)), remaining = dist - warp.arrive;
-    const tgt = Math.max(25, Math.min(900, remaining * 1.1)) * align * align, sp = ship.vel.length();
-    const ns = lerp(sp, tgt, 1 - Math.exp(-dt * (tgt > sp ? 1.2 : 4)));
-    ship.vel.copy(tV2).multiplyScalar(ns);
-    if (remaining < 4) endWarp(true);
-    else if (k.KeyS) endWarp(false);
+    const align = tV2.dot(warpF), kk = Math.max(0, Math.min(1, (align - .55) / .42)), vp = P.v[i0] + (P.v[i0 + 1] - P.v[i0]) * f;
+    warp.s = Math.min(P.L, warp.s + Math.max(vp, 12) * kk * kk * (3 - 2 * kk) * dt);
+    const fj = Math.min(P.N - 1e-6, warp.s / P.ds), j0 = Math.floor(fj);
+    tV.copy(P.pts[j0]).lerp(P.pts[j0 + 1], fj - j0);                     // 曲线上的新位置
+    ship.vel.copy(tV).sub(ship.pos).divideScalar(Math.max(dt, 1e-4));   // 速度 = 回到曲线上所需的位移 / 时间（这样飞船严格沿着曲线走）
+    if (warp.s >= P.L - .5) endWarp(true);
+    else if (k.KeyS && !warp.emergency) endWarp(false);
     energy = Math.min(energyMax(), energy + 10 * dt);
   } else if (falling) {   // 越过不可回头点：失控翻滚着被拖向奇点，不再响应操作
     tV.copy(bh.position).sub(ship.pos).normalize();
@@ -1346,12 +1525,12 @@ function update(dt) {
       pl.M += dt * TAU / pl.p.period / 6 * pl.p.dir; orbitPos(pl.p, solveE(pl.M, pl.p.ecc), pl.mesh.position);
       pl.mesh.rotation.y += dt * .4;
       for (const m of pl.moons) m.pivot.rotation.y += dt * m.speed;
-      if (!warp && pl.show) {
+      if (pl.show) {
         pl.mesh.getWorldPosition(tV); tV2.copy(ship.pos).sub(tV); const rr = pl.p.radius + 2.5, d = tV2.length();
         if (d < rr && d > 0) {
           // 计算碰撞法线，推开飞船
           tV2.divideScalar(d); ship.pos.copy(tV).addScaledVector(tV2, rr);
-          const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2); hit(-vn)
+          const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2); if (!warp) hit(-vn)
         }
       }
     }
@@ -1361,10 +1540,10 @@ function update(dt) {
       s.mesh.rotation.y += dt * .1;
       tV.copy(s.mesh.position).add(sp);                 // 这颗恒星的世界坐标
       const sd = ship.pos.distanceTo(tV), sr = s.st.radius;
-      if (!warp && sd < sr * 1.5 + 2) {
+      if (sd < sr * 1.5 + 2) {
         // 计算碰撞法线，推开飞船
         tV2.copy(ship.pos).sub(tV).normalize(); ship.pos.copy(tV).addScaledVector(tV2, sr * 1.5 + 2);
-        const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2); hit(-vn)
+        const vn = ship.vel.dot(tV2); if (vn < 0) ship.vel.addScaledVector(tV2, -vn * 1.2); if (!warp) hit(-vn)
       }
       if (sd < sr * 4.5 && fuel < fuelMax()) { fuel = Math.min(fuelMax(), fuel + 6 * dt); scooping = true }
     }
@@ -1431,6 +1610,8 @@ function update(dt) {
 // HUD
 // =====================================================================
 const projV = new THREE.Vector3(), fwdV = new THREE.Vector3();
+const BH_MARK_R = 300;   // 离奇点多近开始显示距离标注
+const bhMarkEl = Object.assign(document.createElement('div'), { id: 'bhmark', className: 'hidden' }); $('tmark').parentNode.appendChild(bhMarkEl);
 function toScreen(pos) {
   fwdV.set(0, 0, -1).applyQuaternion(camera.quaternion);
   const behind = projV.copy(pos).sub(camera.position).dot(fwdV) < 0;
@@ -1513,9 +1694,19 @@ function updateHUD() {
     bm.classList.remove('hidden'); bm.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
     $('bmarkTxt').textContent = T.sig.markerStory(Math.round(dB));
   } else bm.classList.add('hidden');
+  // 奇点距离标注：不管有没有任务、有没有设为目标，靠近到 BH_MARK_R 以内就一直显示（深色底 + 青色边框，不会被奇点周围的光吞掉）
+  const bhm = bhMarkEl, dBh = ship.pos.distanceTo(bh.position), showBh = !warp && !falling && dBh < BH_MARK_R;
+  if (showBh) {
+    const s = toScreen(bh.position); let x = s.x, y = s.y + Math.min(innerHeight * .28, 34 * 620 / dBh * .55 + 22);   // 放在吸积盘下方，近了也不压在光上
+    if (s.behind) { x = innerWidth - x; y = innerHeight - y }
+    const m = 48; x = Math.max(m, Math.min(innerWidth - m, x)); y = Math.max(m, Math.min(innerHeight - m, y));
+    if (s.behind) { x = x < innerWidth / 2 ? m : innerWidth - m }
+    bhm.classList.remove('hidden'); bhm.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
+    bhm.textContent = T.hud.markerBh(Math.round(dBh));
+  } else bhm.classList.add('hidden');
   // 目标标记
   const tm = $('tmark');
-  if (target) {
+  if (target && !(showBh && target.i === -1)) {   // 目标就是奇点、而奇点标注已经在显示：不重复
     const s = toScreen(target.pos); let x = s.x, y = s.y;
     if (s.behind) { x = innerWidth - x; y = innerHeight - y }
     const m = 40; x = Math.max(m, Math.min(innerWidth - m, x)); y = Math.max(m, Math.min(innerHeight - m, y));
@@ -1676,7 +1867,7 @@ function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(clock.getDelta(), .05);
   if (running) { promoTick(); quizTick(); welcomeTick() }  
-  if (running && !paused()) { update(dt); hazards(dt); redFx(); hullWarn(); tutTick(dt); updateHUD() }
+  if (running && !paused()) { update(dt); txTick(dt); hazards(dt); redFx(); hullWarn(); tutTick(dt); updateHUD() }
   else if (running) { updateHUD(); tutTick(dt) }   // 面板打开时游戏暂停，但 HUD 和教学提示仍要同步
   else if (!running) { // 开始界面：缓慢环视
     tQ.setFromEuler(tE.set(0, dt * .04, 0)); ship.quat.multiply(tQ); camera.quaternion.copy(ship.quat); updateLOD();

@@ -7,7 +7,7 @@ import { makeRng, lerp } from './rng.js';
 
 const SYL = ["ae", "ky", "or", "ven", "ta", "lu", "xi", "ra", "mo", "zen", "thal", "is", "ur", "no", "va", "kar", "el", "dra"];
 
-export function genGalaxy(R, n = 80000, arms = 4, spin = 4.2) {
+export function genGalaxy(R, n = 130000, arms = 4, spin = 4.2) {
   const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), core = [1, .82, .55], edge = [.45, .65, 1];
   for (let i = 0; i < n; i++) {
     let x, y, z, t;
@@ -49,6 +49,7 @@ export function genNebulae(R, count = 14) {
   }
   return out;
 }
+const MIN_R_BH = 320, MIN_GAP = 260;   // 星系离银心的最小距离 / 星系之间的最小间距（单位 u）
 export function genSystems(R, gal, count = 45) {
   const list = [], names = new Set();
   const mk = (pos, home) => {
@@ -70,9 +71,9 @@ export function genSystems(R, gal, count = 45) {
   const N = gal.pos.length / 3;
   for (let tries = 0; list.length < count && tries < 4000; tries++) {
     const k = R.int(0, N - 1), x = gal.pos[k * 3], y = gal.pos[k * 3 + 1], z = gal.pos[k * 3 + 2], r = Math.hypot(x, z);
-    if (r < 200 || r > GR * .95) continue;
+    if (r < MIN_R_BH || r > GR * .95) continue;   // 离银心奇点至少 MIN_R_BH：潮汐区半径 160 + 行星区约 100 + 缓冲
     const p = new THREE.Vector3(x, y * .3, z);
-    if (list.some(s => s.pos.distanceTo(p) < 200)) continue;
+    if (list.some(s => s.pos.distanceTo(p) < MIN_GAP)) continue;
     mk([x, y * .3, z], false);
   }
   sampleReal(list);   // 抽一批真实星系换进去（用独立随机数，其余宇宙不变）

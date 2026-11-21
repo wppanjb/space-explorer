@@ -278,12 +278,17 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
 // ---------- 星系全景图（示意图）：俯视图，已扫描的行星画实心，没扫描的只画轨道和虚线圈 ----------
 // meta = { title, sub, starLabel, count, date, src, srcCol }；snapIds = 拍摄时已扫描的行星 id（出发点始终算已知）
 const ORBIT_COLS = ['#ff7a7a', '#ffb347', '#ffe066', '#7be08a', '#5fd4e8', '#6f9bff', '#c18bff', '#ff8ad8'];   // 全景图里各条行星轨道的颜色
-export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H = 450) {
+// 全景图的视角：仰角（从轨道平面往上抬多少度，越大越接近俯视）+ 方位角（从哪个方向看）。
+// 仰角统一；方位角由星系种子决定：每个星系朝向不同，但同一个星系永远是同一个角度（不需要存进存档）
+const PANO_ELEV = 30, PANO_ROLL = 15;   // 仰角 30°；滚转 15°：整个画面斜过来，左边低、右边高
+const panoAzim = sys => mulberry32(sys.seed ^ 0xa21a)() * 360;
+export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H = 450, view = {}) {
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const g = cv.getContext('2d');
   g.fillStyle = '#04060f'; g.fillRect(0, 0, W, H);
   const rnd = mulberry32(sys.seed ^ 0x5eed);
   for (let i = 0; i < 140; i++) { g.fillStyle = `rgba(255,255,255,${.15 + rnd() * .5})`; g.fillRect(rnd() * W, rnd() * H, rnd() < .1 ? 2 : 1, rnd() < .1 ? 2 : 1) }
-  const cx = W / 2, cy = H / 2 + 14, tilt = .4, ids = new Set(snapIds);
+  const elev = (view.elev ?? PANO_ELEV) * Math.PI / 180, roll = (view.roll ?? PANO_ROLL) * Math.PI / 180, cosR = Math.cos(roll), sinR = Math.sin(roll), azim = (view.azim ?? panoAzim(sys)) * Math.PI / 180, cosA = Math.cos(azim), sinA = Math.sin(azim);
+  const cx = W / 2, cy = H / 2 + 14, tilt = Math.sin(elev), ids = new Set(snapIds);
   const maxD = Math.max(60, ...planets.map(p => p.dist)), rx = d => 64 + 290 * Math.sqrt(d / maxD);
   const sc = stars[0].color, sr = Math.max(14, Math.min(46, 10 + stars[0].radius * 1.6));
   // 轨道：和游戏里一样带离心率（恒星在焦点上）、倾角和升交点方向；用固定的斜俯视角度投影到画面上
@@ -292,7 +297,9 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
     const a = rx(p.dist), x0 = a * (Math.cos(E) - p.ecc), z0 = -a * Math.sqrt(1 - p.ecc * p.ecc) * Math.sin(E), inc = p.inc || 0, nd = p.node || 0;
     const y1 = -z0 * Math.sin(inc), z1 = z0 * Math.cos(inc);   // 先按倾角抬起，再绕竖轴转到升交点方向（和游戏里 rotation.set(inc, node, 0, 'YXZ') 一致）
     const X = x0 * Math.cos(nd) + z1 * Math.sin(nd), Z = -x0 * Math.sin(nd) + z1 * Math.cos(nd);
-    return [X, Z * sinP - y1 * cosP];
+    const X2 = X * cosA + Z * sinA, Z2 = -X * sinA + Z * cosA;   // 绕竖轴转到这个星系的方位角
+    const sx = X2, sy = Z2 * sinP - y1 * cosP;
+    return [sx * cosR + sy * sinR, sy * cosR - sx * sinR];   // 画面滚转：右边抬高、左边压低
   };
   const kep = (M, e) => { let E = M; for (let k = 0; k < 6; k++) E -= (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E)); return E };
   const paths = planets.map(p => Array.from({ length: 73 }, (_, k) => orbitOff(p, k / 72 * 6.283185)));
@@ -301,7 +308,7 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
   // 小行星带
   if (sys.belt) {
     const [a, b] = sys.belt, r1 = rx(a) * fit, r2 = rx(b) * fit, br = mulberry32(sys.seed ^ 0xbe17);
-    for (let i = 0; i < 260; i++) { const t = br() * 6.283, r = r1 + (r2 - r1) * br(); g.fillStyle = `rgba(190,180,165,${.25 + br() * .4})`; g.fillRect(cx + Math.cos(t) * r, cy + Math.sin(t) * r * tilt, 1.6, 1.6) }
+    for (let i = 0; i < 260; i++) { const t = br() * 6.283, r = r1 + (r2 - r1) * br(); g.fillStyle = `rgba(190,180,165,${.25 + br() * .4})`; { const bx = Math.cos(t) * r, by = Math.sin(t) * r * tilt; g.fillRect(cx + bx * cosR + by * sinR, cy + by * cosR - bx * sinR, 1.6, 1.6) } }
   }
   // 轨道线
   g.lineWidth = 1.3;
@@ -310,12 +317,31 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
     paths[i].forEach(([dx, dy], k) => k ? g.lineTo(cx + dx * fit, cy + dy * fit) : g.moveTo(cx + dx * fit, cy + dy * fit)); g.stroke(); g.globalAlpha = 1;
   });
   g.setLineDash([]);
-  // 恒星（多星系统：伴星画在旁边）
-  const glow = g.createRadialGradient(cx, cy, sr * .3, cx, cy, sr * 3.2); glow.addColorStop(0, css(sc, .55)); glow.addColorStop(1, css(sc, 0));
-  g.fillStyle = glow; g.beginPath(); g.arc(cx, cy, sr * 3.2, 0, 6.283); g.fill();
-  g.fillStyle = css(mix(sc, [1, 1, 1], .35)); g.beginPath(); g.arc(cx, cy, sr, 0, 6.283); g.fill();
-  stars.slice(1).forEach((s, i) => { const x = cx + (i ? -1 : 1) * (sr + 20 + i * 10), y = cy - sr * .6 - i * 6, r = Math.max(5, Math.min(16, 4 + s.radius * .9)); g.fillStyle = css(mix(s.color, [1, 1, 1], .3)); g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill() });
-  g.textAlign = 'center'; g.font = '12px "Microsoft YaHei",sans-serif'; g.fillStyle = '#c9d6ee'; g.fillText(meta.starLabel, cx, cy + sr + 18);
+  // 恒星：和游戏里一样，A、B 两颗绕共同的质心（画面中心，也是各条轨道的焦点）相对而转，位置按它们此刻的相位画；
+  // 第三颗伴星远在轨道之外，画在画面边缘它所在的方向上
+  const projXZ = (X, Z) => { const X2 = X * cosA + Z * sinA, Z2 = -X * sinA + Z * cosA, sy = Z2 * sinP; return [X2 * cosR + sy * sinR, sy * cosR - X2 * sinR] };
+  const starR = (k, st) => k ? Math.max(5, Math.min(16, 4 + st.radius * .9)) : sr;
+  const pos = stars.map(() => [cx, cy]);
+  if (stars.length > 1) {
+    const oA = stars[0].orbitR, oB = stars[1].orbitR, sep = Math.max(.01, oA + oB), d0 = Math.min(...planets.map(p => p.dist), 1e9);
+    // 屏幕上的间距：按最内侧行星轨道的大小来缩放，但至少要让两颗星不叠在一起，也不要伸出最内侧的轨道
+    let ds = Math.min(.8 * rx(d0) * fit, Math.max(.5 * rx(d0) * fit, sr + starR(1, stars[1]) + 14)); ds = Math.max(ds, sr + starR(1, stars[1]) + 8);
+    [0, 1].forEach(k => { const st = stars[k], a = (st.phase || 0), [dx, dy] = projXZ(Math.cos(a), Math.sin(a)); pos[k] = [cx + dx * ds * st.orbitR / sep, cy + dy * ds * st.orbitR / sep] });
+  }
+  if (stars.length > 2) {
+    const a = stars[2].phase || 0, [dx, dy] = projXZ(Math.cos(a), Math.sin(a)), m = Math.max(1e-6, Math.hypot(dx, dy)), ux = dx / m, uy = dy / m;
+    const tx = ux > 0 ? (W - 44 - cx) / ux : ux < 0 ? (44 - cx) / ux : 1e9, ty = uy > 0 ? (H - 52 - cy) / uy : uy < 0 ? (96 - cy) / uy : 1e9, t = Math.min(tx, ty);
+    pos[2] = [cx + ux * t, cy + uy * t];
+  }
+  [2, 1, 0].forEach(k => {   // 从远到近：先画第三颗，最后画主星
+    if (k >= stars.length) return;
+    const st = stars[k], [x, y] = pos[k], r = starR(k, st), col = st.color;
+    const glow = g.createRadialGradient(x, y, r * .3, x, y, r * 3.2); glow.addColorStop(0, css(col, k ? .4 : .55)); glow.addColorStop(1, css(col, 0));
+    g.fillStyle = glow; g.beginPath(); g.arc(x, y, r * 3.2, 0, 6.283); g.fill();
+    g.fillStyle = css(mix(col, [1, 1, 1], k ? .3 : .35)); g.beginPath(); g.arc(x, y, r, 0, 6.283); g.fill();
+  });
+  g.textAlign = 'center'; g.font = '12px "Microsoft YaHei",sans-serif'; g.fillStyle = '#c9d6ee'; g.fillText(meta.starLabel, pos[0][0], pos[0][1] + sr + 18);
+  g.font = '11px "Microsoft YaHei",sans-serif'; g.fillStyle = '#9fb4d6'; for (let k = 1; k < stars.length; k++) g.fillText('ABC'[k], pos[k][0], pos[k][1] + starR(k, stars[k]) + 14);
   // 行星（靠下的画在前面）
   const spots = planets.map(p => { const [dx, dy] = orbitOff(p, kep(p.phase, p.ecc)); return { p, x: cx + dx * fit, y: cy + dy * fit } }).sort((a, b) => a.y - b.y);
   for (const { p, x, y } of spots) {
@@ -324,7 +350,7 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
       const gr = g.createRadialGradient(x - pr * .35, y - pr * .35, pr * .1, x, y, pr); gr.addColorStop(0, css(p.palette[1])); gr.addColorStop(1, css(p.palette[0]));
       if (p.glow) { g.fillStyle = css(p.glow, .3); g.beginPath(); g.arc(x, y, pr * 1.9, 0, 6.283); g.fill() }
       g.fillStyle = gr; g.beginPath(); g.arc(x, y, pr, 0, 6.283); g.fill();
-      if (p.ring) { g.strokeStyle = 'rgba(230,215,170,.8)'; g.lineWidth = 2; g.beginPath(); g.ellipse(x, y, pr * 1.8, pr * .5, -.25, 0, 6.283); g.stroke() }
+      if (p.ring) { g.strokeStyle = 'rgba(230,215,170,.8)'; g.lineWidth = 2; g.beginPath(); g.ellipse(x, y, pr * 1.8, pr * .5, -.25 - roll, 0, 6.283); g.stroke() }
       g.fillStyle = '#dfe9ff'; g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText(p.name, x, y + pr + 13);
     } else {
       g.strokeStyle = 'rgba(160,190,230,.55)'; g.lineWidth = 1.2; g.setLineDash([2, 3]); g.beginPath(); g.arc(x, y, pr, 0, 6.283); g.stroke(); g.setLineDash([]);
