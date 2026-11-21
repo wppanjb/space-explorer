@@ -765,7 +765,7 @@ function endWarp(arrived) {
   if (!warp) return;
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ship.quat);
   ship.vel.copy(fwd).multiplyScalar(arrived ? 20 : Math.min(ship.vel.length(), maxSpeed()));
-  if (arrived) { toast(warp.emergency ? T.toast.emgArrive : T.toast.warpArrive(warp.target.name), 'good'); beep(520, .2); if (target === warp.target) target = null }
+  if (arrived) { if (warp.emergency) emgFuelHint(); else toast(T.toast.warpArrive(warp.target.name), 'good'); beep(520, .2); if (target === warp.target) target = null }
   warp = null;
 }
 
@@ -1047,6 +1047,14 @@ function bhWarnTick(d) {
   else if (bhWarnEl && (d <= BH_WARN_OFF || d >= BH_WARN_RESET)) bhWarnClear();
   else if (bhWarnEl && !bhWarnEl.isConnected) $('toasts').appendChild(bhWarnEl);   // 被别的提示挤掉了就放回去
 }
+// 紧急曲速到家后：燃料是 0，常驻提示「找恒星补充燃料」，直到燃料 > 0 才消失
+let emgFuelEl = null;
+function emgFuelHint() { if (emgFuelEl) emgFuelEl.remove(); emgFuelEl = makeToast(T.toast.emgArrive, 'good', true) }
+function emgFuelTick() {
+  if (!emgFuelEl) return;
+  if (fuel > 0 || hull <= 0) { emgFuelEl.remove(); emgFuelEl = null }
+  else if (!emgFuelEl.isConnected) $('toasts').appendChild(emgFuelEl);   // 被别的提示挤掉了就放回去
+}
 function tide(dt) {
   const d = ship.pos.distanceTo(bh.position);
   bhWarnTick(d);
@@ -1244,6 +1252,7 @@ function demote() {   // 被强制送回家园：降一级（最低初级），�
   setQuestTarget();
 }
 function hazards(dt) {
+  emgFuelTick();
   if (bhWarnEl && (warp || falling || hull <= 0 || rank() < 1)) bhWarnClear();
   if (rank() < 1) { tideDepth = 0; flare = null; inBelt = false; meltDepth = 0; return }   // 实习生：没有危险
   if (warp) { tideDepth = 0; meltDepth = 0; return }
