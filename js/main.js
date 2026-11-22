@@ -1191,11 +1191,22 @@ function redFx() {
   if (tideDepth > 0) a = Math.max(a, tideDepth * (.5 + .4 * Math.sin(t * (4 + 6 * tideDepth))));   // 潮汐：越近越亮越快
   $('redfx').style.opacity = Math.max(0, a).toFixed(2);
 }
-function welcomeTick() {   // 第一个移动教学完成（或教学已关闭）后，显示欢迎和训练目标
+function welcomeTick() {   // 第一个移动教学完成（或教学已关闭）后，显示欢迎和训练目标；弹窗停留到玩家点「知道了」
   if (welcomed || !running || openP || cardHold) return;
   if (!(tutOff || tutDone.includes(0))) return;
   welcomed = true;
-  toast(T.rank.welcome(systems[0].name), 'good');
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const html = esc(T.rank.welcome(systems[0].name)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+  const box = $('know').firstElementChild;
+  box.classList.remove('lib'); box.classList.add('rich');
+  box.innerHTML = `<div class="kbody c-promo" style="--col:#ffe7a8;--col-glow:rgba(255,214,120,.55);--col-fill:#b8892a">
+      <div class="ktag c-promo-tag">WELCOME ABOARD</div>
+      <h2 class="c-promo-rank">欢迎登舰</h2>
+      <p style="text-align:center;line-height:1.8">${html}</p>
+      <div class="row" style="justify-content:center"><button id="welcomeOk">知道了</button></div>
+    </div>`;
+  $('welcomeOk').onclick = () => closePanel();
+  openPanel('know'); fanfare(0);
 }
 
 // =====================================================================
