@@ -1,10 +1,11 @@
 // 全局常量与剧情文本
-export const VERSION = '0.10.0';
+export const VERSION = '1.0.0-alpha';
 // TAU = 2π，GR = 银河半径，HOME_POS = 初始星系位置
-export const TAU = Math.PI * 2, GR = 1400, HOME_POS = [484, 0, 132];
+export const TAU = Math.PI * 2, GR = 3800, HOME_POS = [1314, 0, 358];   // 银河放大 3800/1400 倍（原版 1400 / [484, 0, 132]）
+export const SCALE = GR / 1400;   // 相对原版的放大倍数：曲速 / 探测 / 传送的燃料按它折算
 export const ROMAN = ['I','II','III','IV','V','VI','VII','VIII'];
 export const STAR_COLS = [[1,.85,.6],[1,.95,.8],[1,.7,.45],[.8,.88,1],[1,.6,.4]];
-export const SAVE_KEY = 'deepspace-explorer-save-v1';
+export const SAVE_KEY = 'deepspace-explorer-save-v2';
 export const FRAG_N = 7;
 export const FRAG_TEXT = [
   '……第一次广播。我们在银河边缘点燃了灯塔，等待有人回应。',

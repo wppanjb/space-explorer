@@ -1,10 +1,10 @@
 # Deep Space Explorer
 
-![Deep Space Explorer](assets/thumbnail.jpg)
+![Deep Space Explorer](assets/bg.png)
 
 驾驶探索飞船穿越一座程序化生成的旋臂星系：跳跃到陌生恒星系，扫描未知行星，收集样本换取信用点，升级飞船，去往更远的深空。主线「银心信号」：收集 7 块先驱者留下的信号碎片，抵达银河中心，扫描那颗奇点。
 
-纯前端项目（Three.js + 原生 ES Modules），无需构建。当前版本：**v0.9.0**
+纯前端项目（Three.js + 原生 ES Modules），无需构建。当前版本：**v1.0.0-alpha**
 
 ## 玩法
 

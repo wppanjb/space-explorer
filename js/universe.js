@@ -5,19 +5,26 @@ import { SOL, buildSolPlanets } from './real.js';
 import { sampleReal, buildRealStars, buildRealPlanets } from './realsystems.js';
 import { makeRng, lerp } from './rng.js';
 
+// ---------- 星系的大小与间距 ----------
+// 每个星系的范围（最外圈行星的远日点 + 行星占用的空间，或伴星的轨道）不超过 SYS_R_MAX（下面的 fitOrbits 保证）。
+// 星系之间的间距 ≥ 两个最大范围 + SYS_BUFFER，所以任意两个星系的范围之间至少隔着 SYS_BUFFER，不会互相重叠。
+// 银河半径 GR 在 constants.js（3800）；K = 相对原版（1400）放大的倍数，背景星 / 星云 / 银心的尺寸跟着放大。
+export const SYS_R_MAX = 300, SYS_BUFFER = 100;
+const K = GR / 1400, BH_TIDE_R = 160;   // BH_TIDE_R：奇点潮汐区半径（和 main.js 里的 TIDE_R 一致）
+
 const SYL = ["ae", "ky", "or", "ven", "ta", "lu", "xi", "ra", "mo", "zen", "thal", "is", "ur", "no", "va", "kar", "el", "dra"];
 
-export function genGalaxy(R, n = 130000, arms = 4, spin = 4.2) {
+export function genGalaxy(R, n = 260000, arms = 4, spin = 4.2) {
   const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), core = [1, .82, .55], edge = [.45, .65, 1];
   for (let i = 0; i < n; i++) {
     let x, y, z, t;
     if (R.rand() < .18) {
-      const r = Math.abs(R.gauss(0, 45)), th = R.uni(0, TAU), ph = Math.acos(R.uni(-1, 1));
+      const r = Math.abs(R.gauss(0, 45)) * K, th = R.uni(0, TAU), ph = Math.acos(R.uni(-1, 1));
       x = r * Math.sin(ph) * Math.cos(th); y = r * Math.cos(ph) * .55; z = r * Math.sin(ph) * Math.sin(th); t = 0;
     } else {
       const r = GR * Math.pow(R.rand(), .72); t = r / GR;
       const ang = t * spin + (i % arms) * TAU / arms + R.gauss(0, .28 * (1 - .5 * t));
-      x = Math.cos(ang) * r; z = Math.sin(ang) * r; y = R.gauss(0, 7) * (1 - t * .6);
+      x = Math.cos(ang) * r; z = Math.sin(ang) * r; y = R.gauss(0, 7) * (1 - t * .6) * K;
     }
     const b = R.uni(.55, 1);
     let c = [0, 1, 2].map(k => lerp(core[k], edge[k], Math.min(1, t * 1.3)) * b);
@@ -29,7 +36,7 @@ export function genGalaxy(R, n = 130000, arms = 4, spin = 4.2) {
 export function genBackground(R, n = 7000) {
   const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), tints = [[1, 1, 1], [.8, .88, 1], [1, .9, .75]];
   for (let i = 0; i < n; i++) {
-    const v = [R.gauss(), R.gauss(), R.gauss()], m = Math.hypot(...v) || 1, d = R.uni(4000, 6000), b = R.uni(.4, 1);
+    const v = [R.gauss(), R.gauss(), R.gauss()], m = Math.hypot(...v) || 1, d = R.uni(4000, 6000) * K, b = R.uni(.4, 1);
     pos.set(v.map(a => a / m * d), i * 3); col.set(R.pick(tints).map(c => c * b), i * 3);
   }
   return { pos, col };
@@ -39,17 +46,18 @@ export function genBackground(R, n = 7000) {
 export function genNebulae(R, count = 14) {
   const pal = [[.9, .25, .55], [.3, .45, 1], [.55, .3, .95], [.2, .85, .8], [1, .55, .25]], out = [];
   for (let i = 0; i < count; i++) {
-    const r = GR * R.uni(.2, 1.1), a = R.uni(0, TAU), cx = Math.cos(a) * r, cy = R.gauss(0, 20), cz = Math.sin(a) * r, color = R.pick(pal);
+    const r = GR * R.uni(.2, 1.1), a = R.uni(0, TAU), cx = Math.cos(a) * r, cy = R.gauss(0, 20) * K, cz = Math.sin(a) * r, color = R.pick(pal);
     for (let j = 0; j < 26; j++)out.push({
-      p: [cx + R.gauss(0, 38), cy + R.gauss(0, 14), cz + R.gauss(0, 38)],
-      s: R.uni(50, 150),
+      p: [cx + R.gauss(0, 38) * K, cy + R.gauss(0, 14) * K, cz + R.gauss(0, 38) * K],
+      s: R.uni(50, 150) * K,
       c: color.map(v => Math.min(1, v * R.uni(.8, 1.15))),
       o: R.uni(.02, .06) // opacity
     });
   }
   return out;
 }
-const MIN_R_BH = 320, MIN_GAP = 260;   // 星系离银心的最小距离 / 星系之间的最小间距（单位 u）
+const MIN_GAP = 2 * SYS_R_MAX + SYS_BUFFER;                 // 星系之间的最小间距：两个最大范围 + 缓冲（700 u）
+const MIN_R_BH = BH_TIDE_R + SYS_R_MAX + 100;              // 星系离银心的最小距离：潮汐区 + 一个最大范围 + 缓冲（560 u）
 export function genSystems(R, gal, count = 45) {
   const list = [], names = new Set();
   const mk = (pos, home) => {
@@ -71,7 +79,7 @@ export function genSystems(R, gal, count = 45) {
   const N = gal.pos.length / 3;
   for (let tries = 0; list.length < count && tries < 4000; tries++) {
     const k = R.int(0, N - 1), x = gal.pos[k * 3], y = gal.pos[k * 3 + 1], z = gal.pos[k * 3 + 2], r = Math.hypot(x, z);
-    if (r < MIN_R_BH || r > GR * .95) continue;   // 离银心奇点至少 MIN_R_BH：潮汐区半径 160 + 行星区约 100 + 缓冲
+    if (r < MIN_R_BH || r > GR * .95) continue;   // 离银心奇点至少 MIN_R_BH：整个星系范围都在潮汐区之外
     const p = new THREE.Vector3(x, y * .3, z);
     if (list.some(s => s.pos.distanceTo(p) < MIN_GAP)) continue;
     mk([x, y * .3, z], false);
@@ -171,11 +179,67 @@ export function genStars(sys) {
   }
   if (n === 3) {
     const c = stars[2];
-    c.orbitR = Math.min(400, Math.max(R.uni(230, 300), (stars.pMin + 60) / .35));   // 第三颗要远到容得下整串行星
+    c.orbitR = Math.min(SYS_R_MAX - c.radius - 6, 400, Math.max(R.uni(230, 300), (stars.pMin + 60) / .35));   // 第三颗要远到容得下整串行星，但不能伸出星系范围 SYS_R_MAX
     c.phase = R.uni(0, TAU); c.speed = 12 * Math.sqrt((stars.innerMass + mass(c)) / c.orbitR ** 3);
     stars.pMax = c.orbitR * .35;                         // 行星稳定上限
   }
   return starCache[sys.i] = stars;
+}
+// ---------- 行星轨道排布：保证间距、星系范围不超过 SYS_R_MAX ----------
+// 行星占的空间：带环 = 2.5 倍半径；卫星 = 最外一颗卫星的轨道 + 卫星自己的大小（和 main.js 里卫星的画法一致）；两者取大
+const moonK = m => m <= 0 ? 1 : m <= 4 ? 2.33 + .97 * (m - 1) : Math.max(5.24, 4.97 + .18 * (m - 4));
+const reach = p => p.radius * Math.max(p.ring ? 2.5 : 1, moonK(p.moons));
+const apo = p => p.dist * (1 + (p.ecc || 0)), peri = p => p.dist * (1 - (p.ecc || 0));
+const hasBelt = (sys, n) => !sys.belt && sys.cat !== 'compact' && n >= 4;   // 太阳系用自己的带；紧凑星系（行星挨得很近）没有带
+const BELT_PAD = 4;                                                         // 小行星带离相邻行星占用空间的余量
+// 从上到下依次尝试，第一个让星系范围 ≤ SYS_R_MAX 的就用：
+//   keep = 排轨道时给每颗行星预留的偏心率；gap = 相邻行星之间球体的最小间距；belt = 第 3、4 颗之间的间距（含小行星带）
+//   tight = 完全按最小间距紧凑排（不保留原来的随机间距）；strip = 最后手段：去掉环、气态巨行星最多留 1 颗卫星（只影响外观）
+const RUNGS = [
+  { keep: .05, gap: 8, belt: 18 }, { keep: .02, gap: 8, belt: 18 }, { keep: .02, gap: 6, belt: 16 }, { keep: 0, gap: 4, belt: 16 },
+  { keep: 0, gap: 3, belt: 14 }, { keep: 0, gap: 2, belt: 12, tight: true }, { keep: 0, gap: 2, belt: 12, tight: true, strip: true }];
+function layout(base, belt, r) {
+  const pl = base.map(p => ({ radius: p.radius, ring: r.strip ? false : p.ring, moons: r.strip && p.kind === 'gas' ? Math.min(p.moons, 1) : p.moons, dist: p.dist, e0: p.ecc, ecc: Math.min(p.ecc, r.keep) }));
+  const gapAt = i => belt && i === 3 ? r.belt : r.gap;   // i = 它与前一颗之间
+  // 1) 从内到外：内侧远日点 + 两者占用空间 + 间距 ≤ 外侧近日点（偏心率先按 keep 预留，避免外圈越推越远）
+  for (let i = 1; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i], need = (apo(a) + reach(a) + reach(b) + gapAt(i)) / (1 - b.ecc);
+    b.dist = r.tight ? need : Math.max(b.dist, need);
+  }
+  // 2) 空隙有富余的行星，把偏心率放回去（不超过原来的）；相邻两颗的偏心率之和不会让轨道交叉或小于 gap
+  for (let i = 0; i < pl.length; i++) {
+    const a = pl[i - 1], b = pl[i], c = pl[i + 1];
+    let cap = b.e0;
+    if (a) cap = Math.min(cap, (b.dist - a.dist - reach(a) - reach(b) - gapAt(i) - a.dist * a.ecc) / b.dist);          // 前一颗已定
+    if (c) cap = Math.min(cap, (c.dist - b.dist - reach(b) - reach(c) - gapAt(i + 1) - c.dist * c.ecc) / b.dist);      // 后一颗按预留
+    b.ecc = Math.max(b.ecc, cap);
+  }
+  return pl;
+}
+const extentOf = pl => pl.reduce((m, p) => Math.max(m, apo(p) + reach(p)), 0);
+// 只往外推（或压低偏心率），种类 / 半径 / 随机序列 / info 都不变；行星的 dist 变了就重算公转周期
+function fitOrbits(planets, sys) {
+  const belt = hasBelt(sys, planets.length); let best = null;
+  for (const r of RUNGS) { best = layout(planets, belt, r); if (extentOf(best) <= SYS_R_MAX) break }
+  planets.forEach((p, i) => {
+    const q = best[i]; if (q.dist !== p.dist) { p.dist = q.dist; p.period = Math.pow(p.dist, 1.5) * .06 }
+    p.ecc = q.ecc; p.ring = q.ring; p.moons = q.moons;
+  });
+}
+// 星系的范围：最外圈行星的远日点 + 占用空间，或伴星的轨道（main.js 用它决定加载 / 卸载 / 进入 / 全景的半径）
+const extCache = {};
+export function sysExtent(sys) {
+  if (extCache[sys.i] == null) extCache[sys.i] = Math.max(0, ...genPlanets(sys).map(p => apo(p) + reach(p)), ...genStars(sys).map(s => s.orbitR + s.radius));
+  return extCache[sys.i];
+}
+// 小行星带的内外半径 [a, b]：太阳系用自己的 sys.belt；其他星系放在第 3、4 颗行星之间的空隙里；紧凑星系 / 空隙太小 = 没有带（null）
+export function beltBand(sys, planets = genPlanets(sys)) {
+  if (sys.belt) return sys.belt;
+  if (!hasBelt(sys, planets.length)) return null;
+  const p = planets[2], q = planets[3], lo = apo(p) + reach(p) + BELT_PAD, hi = peri(q) - reach(q) - BELT_PAD;
+  if (hi - lo < 4) return null;
+  const w = Math.min(hi - lo, 14), mid = (lo + hi) / 2;
+  return [mid - w / 2, mid + w / 2];
 }
 const planetCache = {};
 export function genPlanets(sys) {
@@ -215,5 +279,6 @@ export function genPlanets(sys) {
     p.info = genInfo(p, R, ns); planets.push(p);
   }
   if (sys.cat) catTweak(sys, planets, ns);
+  fitOrbits(planets, sys);   // 类别改完半径 / 轨道之后，统一排好间距，并保证星系范围 ≤ SYS_R_MAX
   return planetCache[sys.i] = planets;
 }

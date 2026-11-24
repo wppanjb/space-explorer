@@ -270,7 +270,7 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
     for (const t of ['生成', '推测', '实测']) { const w = g.measureText(t).width; x -= w; g.fillStyle = TAG_COL[t]; g.fillText(t, x, H - 18); x -= 10 }
     const lbl = '数据来源：'; g.fillStyle = '#5c6b86'; g.fillText(lbl, x + 10 - g.measureText(lbl).width, H - 18);   // 图例前缀：数值的颜色 = 数据来源
   }
-  g.fillStyle = '#5c6b86'; g.font = '12px monospace'; g.fillText('DEEP SPACE EXPLORER', 24, H - 18);
+  g.fillStyle = '#5c6b86'; g.font = '12px monospace'; g.fillText('深空探索 DEEP SPACE EXPLORER', 24, H - 18);
   g.restore(); g.strokeStyle = rar.col; g.lineWidth = 3; g.beginPath(); g.roundRect(1.5, 1.5, W - 3, H - 3, 18); g.stroke();
   return c;
 }

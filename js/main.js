@@ -5,9 +5,9 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { VERSION, TAU, GR, ROMAN, STAR_COLS, SAVE_KEY, FRAG_N, FRAG_TEXT, LIFE_BONUS } from './constants.js';
+import { VERSION, TAU, GR, ROMAN, STAR_COLS, SAVE_KEY, FRAG_N, FRAG_TEXT, LIFE_BONUS, SCALE } from './constants.js';
 import { mulberry32, makeRng, lerp } from './rng.js';
-import { genGalaxy, genBackground, genNebulae, genSystems, genPlanets, genStars } from './universe.js';
+import { genGalaxy, genBackground, genNebulae, genSystems, genPlanets, genStars, sysExtent, beltBand } from './universe.js';
 import { genFragments, fragKind } from './story.js';
 import { byId, figPlanets } from './realsystems.js';
 import { beep, fanfare } from './audio.js';
@@ -161,7 +161,7 @@ const markers = systems.map(s => {
     map: soft, color: new THREE.Color(...s.color), opacity: 1,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
   }));
-  sp.position.copy(s.pos); sp.scale.setScalar(14 + 5 * (genStars(s).length - 1)); scene.add(sp); return sp
+  sp.position.copy(s.pos); sp.scale.setScalar((14 + 5 * (genStars(s).length - 1)) * SCALE); scene.add(sp); return sp
 });
 
 // 飞行尘埃
@@ -272,10 +272,11 @@ function buildSystem(sys) {
   });
 
   let belt = null;
-  if (sys.belt || planets.length >= 4) {   // 太阳系的带在火星与木星之间（sys.belt），其他星系在第 3 颗行星外
+  const band = beltBand(sys);   // 太阳系用自己的 sys.belt；其他星系在第 3、4 颗行星之间的空隙里；紧凑星系 / 空隙太小 = 没有带
+  if (band) {   // 太阳系的带在火星与木星之间（sys.belt），其他星系在第 3 颗行星外
     // 小行星带：在第 3 颗行星轨道外，随机分布在两条半径之间
     // a = 内半径，b = 外半径，随机分布在 a~b 之间
-    const a = sys.belt ? sys.belt[0] : planets[2].p.dist + 6, b = sys.belt ? sys.belt[1] : planets[2].p.dist + 12;
+    const [a, b] = band;
     belt = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.35, 0), new THREE.MeshStandardMaterial({ color: 0x8a8070, roughness: 1 }), 700);
     const rng = mulberry32(sys.seed), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
     for (let i = 0; i < 700; i++) {
@@ -347,7 +348,8 @@ function disposeSystem(s) {
 // 加载规则：同一时刻最多两个星系——
 //  ① 主星系：离玩家最近的恒星所在星系（与最初版本相同，带迟滞，不会来回闪烁）
 //  ② 主线星系：玩家 260u 内时额外保留，保证主线的行星/信标不会因为“最近恒星”变化而消失
-const LOAD_R = 140, UNLOAD_R = 190, ENTER_R = 110;
+const LOAD_R = 140, UNLOAD_R = 190, ENTER_R = 110;   // 下限；大星系的外圈行星离恒星可能有 300 u，实际半径按星系大小放大
+const loadR = s => Math.max(LOAD_R, sysExtent(s) + 40), unloadR = s => loadR(s) + 50, enterR = s => Math.max(ENTER_R, sysExtent(s) + 10);
 let nearest = systems[0], nearestDist = 1e9, lastEntered = -1, primarySys = null, pinnedSys = null, arriveLock = null, arriveAt = new THREE.Vector3();
 const questSysIdx = () => qOn() ?  fragSys[frags] : -2;
 function updateLOD() {
@@ -357,15 +359,15 @@ function updateLOD() {
   // ① 主星系
   if (primarySys) {
     const dc = primarySys._d;
-    if (dc > UNLOAD_R || (best !== primarySys && bd < LOAD_R && dc > bd + 20)) primarySys = null;
+    if (dc > unloadR(primarySys) || (best !== primarySys && bd < loadR(best) && dc > bd + 20)) primarySys = null;
   }
-  if (!primarySys && bd < LOAD_R) primarySys = best;
+  if (!primarySys && bd < loadR(best)) primarySys = best;
   // 曲速锁定：恒星挨得很近（平均间距约 100u），曲速到达点附近往往有别的恒星更近，
   // 所以曲速目标一进入加载范围就作为主星系，到达后继续保持；
   // 解除条件：离它超过 220u，或者你已离开到达点 40u 以上且别的恒星明显更近（近 60u 以上）
   if (warp) { arriveLock = warp.target; arriveAt.copy(ship.pos) }
-  else if (arriveLock && (arriveLock._d > 220 || (best !== arriveLock && arriveLock._d > bd + 60 && ship.pos.distanceTo(arriveAt) > 40))) arriveLock = null;
-  if (arriveLock && arriveLock._d < LOAD_R) primarySys = arriveLock;
+  else if (arriveLock && (arriveLock._d > Math.max(220, unloadR(arriveLock)) || (best !== arriveLock && arriveLock._d > bd + 60 && ship.pos.distanceTo(arriveAt) > 40))) arriveLock = null;
+  if (arriveLock && arriveLock._d < loadR(arriveLock)) primarySys = arriveLock;
   // ② 主线星系
   // 保留半径只覆盖“确实需要的范围”：信标最远约 165u；扫描行星类任务需要更远的扫描距离
   const qi = questSysIdx(), qs = qi >= 0 ? systems[qi] : null;
@@ -373,8 +375,8 @@ function updateLOD() {
   if (qs) {
     const qPl = genPlanets(qs);   // 有缓存，每帧调用不会重复计算
     pinR = fragKind(frags) === 'planet'
-      ? qPl[fragPlanetIdx(frags)].dist + scanRange() + 20   // 行星离恒星多远 + 你的扫描距离 + 余量
-      : qPl[qPl.length - 1].dist + 50;                        // 最外圈行星 + 信标范围 + 余量
+      ? qPl[fragPlanetIdx(frags)].dist * (1 + qPl[fragPlanetIdx(frags)].ecc) + scanRange() + 20   // 行星离恒星多远 + 你的扫描距离 + 余量
+      : sysExtent(qs) + 50;                        // 最外圈行星 + 信标范围 + 余量
   }
   if (qs && (qs._d < pinR || (pinnedSys === qs && qs._d <= pinR + 50))) pinnedSys = qs; else pinnedSys = null;
   // 卸载不再需要的，加载缺少的
@@ -384,7 +386,7 @@ function updateLOD() {
   cur = (arriveLock && loaded.find(L => L.sys === arriveLock)) || null;   // 曲速锁定的星系优先完整显示
   if (!cur) for (const L of loaded) if (!cur || L.sys._d < cur.sys._d) cur = L;
   // 进入某星系的提示 / 记为已到访
-  const inside = cur && cur.sys._d < ENTER_R ? cur.sys : null;
+  const inside = cur && cur.sys._d < enterR(cur.sys) ? cur.sys : null;
   curSysI = inside ? inside.i : -1;
   const passing = !!(warp && inside && inside !== warp.target);   // 曲速途中路过别的星系：不弹提示 / 介绍，也不算「到访」（到了目标星系、或中途取消曲速后才算）
   if (!inside) lastEntered = -1;
@@ -589,10 +591,10 @@ function starInfoLines(sys, st) {   // 全景图右上角的主恒星资料（�
 }
 function starTypeText(s) { return s.rid ? byId(s.rid).star.type + ' 型恒星' : s.cat === 'redGiant' ? T.sys.redGiant : T.sys.starTypes[Math.max(0, STAR_COLS.indexOf(s.color))] }
 // 拍摄全景图的范围：每个星系用自己的——最外圈行星的轨道 + 30 u，最小 110 u（外圈行星离恒星可能比 110 u 远，比如海王星约 164 u）
-const panoRange = s => Math.max(ENTER_R, genPlanets(s).reduce((m, p) => Math.max(m, p.dist), 0) + 30);
+const panoRange = s => Math.max(ENTER_R, sysExtent(s) + 30);
 function panoSysIdx() {   // 此刻在哪个星系的拍摄范围内（多个重叠时取离恒星最近的）；都不在 = -1
   let bi = -1, bd = 1e9;
-  for (const s of systems) { const d = s.pos.distanceTo(ship.pos); if (d < 320 && d < bd && d <= panoRange(s)) { bd = d; bi = s.i } }
+  for (const s of systems) { const d = s.pos.distanceTo(ship.pos); if (d < bd && d <= panoRange(s)) { bd = d; bi = s.i } }
   return bi;
 }
 function shootPano(si = panoSysIdx(), auto = false) {
@@ -612,7 +614,7 @@ function shootPano(si = panoSysIdx(), auto = false) {
 }
 // ---- 传送回地球：把还没传回的收藏（行星卡、全景图）一次传完。离地球越远，越费燃料、每项越慢；传回的收藏在飞船失败后保留 ----
 let tx = null;   // { q: [{k:'c'|'p', id}], i, t, sec }：传送中；只在游戏运行时（没有打开面板）走时间
-const TX_SEC_MIN = 1, TX_SEC_MAX = 5, TX_FUEL_PER_U = .02;
+const TX_SEC_MIN = 1, TX_SEC_MAX = 5, TX_FUEL_PER_U = .02 / SCALE;
 const unsentCards = () => [...discovered].filter(id => !sent.cards.has(id));
 const unsentPanos = () => Object.keys(panos).filter(k => sent.panos[k] !== panos[k].t).map(Number);
 function txInfo() {
@@ -808,7 +810,7 @@ function cycleTarget() {
   toast(T.toast.target(target.name, Math.round(target.pos.distanceTo(ship.pos)))); beep(880, .06);
 }
 const ARRIVE = 90;
-function warpCost(t) { return Math.max(2, (t.pos.distanceTo(ship.pos) - ARRIVE) * .12) }
+function warpCost(t) { return Math.max(2, (t.pos.distanceTo(ship.pos) - ARRIVE) * .12 / SCALE) }
 function toggleWarp() {
   if (warp) { if (!warp.emergency) endWarp(false); return }   // 紧急曲速取消不了
   if (!target) { toast(T.toast.warpNoTarget, 'warn'); return }
@@ -831,7 +833,7 @@ function endWarp(arrived) {
 // =====================================================================
 // ---------- 远程探测 ----------
 const knows = s => visited.has(s.i) || probed.has(s.i);
-const probeCost = s => Math.round(3 + s.pos.distanceTo(ship.pos) / 100);
+const probeCost = s => Math.round(3 + s.pos.distanceTo(ship.pos) / (100 * SCALE));
 function sysSummary(s) {
   const ps = genPlanets(s).filter(p => !p.home), gas = ps.filter(p => p.kind === 'gas').length, lifeList = ps.filter(p => p.info.life !== '无');
   let best = '', bv = -1; for (const p of lifeList) { const v = LIFE_BONUS[p.info.life] || 0; if (v > bv) { bv = v; best = p.info.life } }
@@ -888,7 +890,7 @@ function questText() {
   if (frags < FRAG_N && !qOn()) return Q.standbyNext(frags + 1, RANKS[Math.min(5, rank() + 1)].name, xp, RANK_NEED[rank()]);
   if (frags >= FRAG_N) return Q.final(Math.round(ship.pos.length()), BH_T.range);
   const t = Q.tag(frags + 1, FRAG_N);
-  const s = systems[fragSys[frags]], L = loaded.find(x => x.sys === s), here = !!L && s.pos.distanceTo(ship.pos) < 220;
+  const s = systems[fragSys[frags]], L = loaded.find(x => x.sys === s), here = !!L && s.pos.distanceTo(ship.pos) < Math.max(220, loadR(s));
   if (fragKind(frags) === 'planet') {
     const pn = s.name + ' ' + ROMAN[fragPlanetIdx(frags)];
     return here ? Q.planetHere(t, pn) : Q.planetFar(t, s.name, Math.round(s.pos.distanceTo(ship.pos)), pn);
@@ -1704,7 +1706,7 @@ function updateHUD() {
   $('energyTxt').textContent = boostLock ? T.hud.boostHot : `${energy.toFixed(0)}/${energyMax()}`;
   $('energyBar').firstElementChild.style.width = energy / energyMax() * 100 + '%';
   $('speedTxt').textContent = ship.vel.length().toFixed(0) + ' u/s' + (warp ? T.hud.warpSuffix : '');
-  $('sysName').textContent = cur && cur.sys._d < 220 ? T.hud.sysName(cur.sys.name, genStars(cur.sys).length) : T.hud.deepSpace;
+  $('sysName').textContent = cur && cur.sys._d < Math.max(220, enterR(cur.sys)) ? T.hud.sysName(cur.sys.name, genStars(cur.sys).length) : T.hud.deepSpace;
   $('nearInfo').textContent = T.hud.nearest(nearest.name, Math.round(nearestDist));
   $('tgtInfo').textContent = target ? T.hud.target(target.name, Math.round(target.pos.distanceTo(ship.pos)), warpCost(target).toFixed(0)) : T.hud.targetNone;
 
@@ -1901,7 +1903,7 @@ mapc.addEventListener('mousemove', e => {
       const sm = sysSummary(s), n = genPlanets(s).filter(p => discovered.has(p.id)).length;
       info = T.map.tipInfo(sm.type, n, sm.n, sm.gas, sm.life, sm.best, sm.value, sm.bc, sm.quest)
     }
-    tip.innerHTML = T.map.tipHead(s.name, visited.has(s.i) ? T.map.tipVisited : probed.has(s.i) ? T.map.tipProbed : '', Math.round(d), Math.max(2, (d - ARRIVE) * .12).toFixed(0)) + '<br>' + info
+    tip.innerHTML = T.map.tipHead(s.name, visited.has(s.i) ? T.map.tipVisited : probed.has(s.i) ? T.map.tipProbed : '', Math.round(d), Math.max(2, (d - ARRIVE) * .12 / SCALE).toFixed(0)) + '<br>' + info
   }
   else tip.style.display = 'none';
 });
