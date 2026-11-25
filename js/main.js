@@ -16,6 +16,7 @@ import { drawPlanetCard, drawSysPanorama } from './cards.js';
 import { T } from './text.js';
 import { BANK } from './quizbank.js';
 import * as H from './templates.js';
+import { SOURCES_MD, SOURCE_LINKS } from './sources.js';
 
 
 const $ = id => document.getElementById(id);
@@ -247,8 +248,8 @@ function buildSystem(sys) {
     mesh.rotation.z = p.tilt; pivot.add(mesh);
     pivot.rotation.set(p.inc, p.node, 0, 'YXZ');
     if (p.ring) {
-      const r = new THREE.Mesh(new THREE.RingGeometry(p.radius * 1.5, p.radius * 2.5, 96),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color(...p.palette[1]), transparent: true, opacity: .55, side: THREE.DoubleSide }));
+      const r = new THREE.Mesh(new THREE.RingGeometry(p.radius * (p.ringFaint ? 1.6 : 1.5), p.radius * (p.ringFaint ? 2.0 : 2.5), 96),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(...p.palette[1]), transparent: true, opacity: p.ringFaint ? .14 : .55, side: THREE.DoubleSide }));
       r.rotation.x = Math.PI / 2 - .3; mesh.add(r)
     }
     const moons = [];
@@ -506,7 +507,34 @@ function unlock(key, quiet) {   // 解锁一条知识库条目（quiet：不提�
   const first = libSet.size === 0; libSet.add(key); saveLib(); addXp(XP.unlock);   // 第一次解锁一条知识库条目 +15 经验
   if (first && !quiet) setTimeout(() => toast(T.toast.libFirst, 'good'), 1200);
 }
+let srcBar = null;
+function placeSrcBar() {   // 把「下载数据出处」放进知识库底部「L 或 Esc 关闭」那一行，靠右
+  const box = $('know').firstElementChild;
+  if (!srcBar || !box || !box.classList.contains('lib')) return;
+  const hits = [...box.querySelectorAll('*')].filter(e => /Esc\s*关闭/.test(e.textContent) && !e.contains(srcBar));
+  let foot = hits.sort((a, b) => a.textContent.length - b.textContent.length)[0];
+  while (foot && foot.parentElement && foot.parentElement !== box && foot.parentElement.textContent.trim() === foot.textContent.trim()) foot = foot.parentElement;
+  if (foot && !foot.contains(srcBar)) { foot.classList.add('srcFoot'); foot.appendChild(srcBar) }
+}
+function ensureSrcBar() {   // 知识库底部：下载数据出处（.md）+ 常用链接
+  if (srcBar) return;
+  const st = document.createElement('style');
+  st.textContent = '.srcFoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap}' +
+    '#srcBar{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;font-size:12px}' +
+    '#srcBar a{color:var(--c);text-decoration:none}#srcBar a:hover{color:#fff;text-decoration:underline}#srcBar button{padding:2px 10px;font-size:12px}';
+  document.head.appendChild(st);
+  srcBar = document.createElement('div'); srcBar.id = 'srcBar';
+  srcBar.innerHTML = '<button id="srcDl">⬇ 下载数据出处（.md）</button><span>真实数据来自：</span>' + SOURCE_LINKS.map(([n, u]) => '<a href="' + u + '" target="_blank" rel="noopener">' + n + '</a>').join('');
+  srcBar.querySelector('button').onclick = e => {
+    e.target.blur();
+    const a = document.createElement('a'), url = URL.createObjectURL(new Blob(['﻿' + SOURCES_MD], { type: 'text/markdown;charset=utf-8' }));
+    a.href = url; a.download = 'deep-space-data-sources.md'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+  new MutationObserver(placeSrcBar).observe($('know'), { childList: true, subtree: true });   // 知识库每次重画都会换掉底部那一行，随时放回去
+  placeSrcBar();
+}
 function renderLib() {
+  ensureSrcBar();
   const box = $('know').firstElementChild; box.classList.remove('rich'); box.classList.add('lib');
   const groups = T.lib.groups.map(g => ({ name: g.name, items: g.keys.filter(k => libSet.has(k)).map(k => ({ key: k, title: KNOW[k].title, isNew: !libSeen.has(k) })) })).filter(g => g.items.length);
   const all = groups.flatMap(g => g.items);

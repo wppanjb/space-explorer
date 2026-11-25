@@ -197,7 +197,7 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
     drawSuns(g, stars, rnd, W, SH, p.dist);
     if (p.ring) {   // 巨大的星环横跨天空
       g.save(); g.translate(W * .5, HY * .3); g.rotate(-.12);
-      for (let w = 0; w < 4; w++) { g.strokeStyle = css(mix(p.palette[1], [1, 1, 1], .25 + w * .12), .38 - w * .07); g.lineWidth = 16 - w * 3.5;
+      for (let w = 0; w < 4; w++) { g.strokeStyle = css(mix(p.palette[1], [1, 1, 1], .25 + w * .12), (.38 - w * .07) * (p.ringFaint ? .25 : 1)); g.lineWidth = (16 - w * 3.5) * (p.ringFaint ? .5 : 1);   // ringFaint：木星的环又暗又窄
         g.beginPath(); g.ellipse(0, HY * 1.1, W * (.95 + w * .05), HY * 1.0, 0, Math.PI * 1.08, Math.PI * 1.92); g.stroke() }
       g.restore();
     }
@@ -221,6 +221,12 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
     drawSuns(g, stars, rnd, W, SH, p.dist);
     if (p.home) for (let k = 0; k < 16; k++) puff(g, rnd() * W, SH * (.12 + rnd() * .38), 40 + rnd() * 70, 9 + rnd() * 14, [1, 1, 1], .5);   // 白云
     for (let m = 0; m < p.moons; m++) { const mx = rnd() * W, my = SH * (.1 + rnd() * .3), mr = m < 4 ? 10 + rnd() * 16 : 2.5 + rnd() * 3.5; g.fillStyle = '#b8b8c0'; g.beginPath(); g.arc(mx, my, mr, 0, 7); g.fill(); g.fillStyle = 'rgba(0,0,10,.45)'; g.beginPath(); g.arc(mx + mr * .35, my, mr * .95, 0, 7); g.fill() }
+    if (p.ring && p.kind === 'ice') {   // 冰巨星（天王星、海王星）：天空里一道暗淡的环，比土星 / 木星的更淡更窄
+      g.save(); g.translate(W * .5, SH * .15); g.rotate(-.12);
+      for (let w = 0; w < 3; w++) { g.strokeStyle = css(mix(p.palette[1], [1, 1, 1], .3 + w * .12), .22 - w * .05); g.lineWidth = 7 - w * 2;
+        g.beginPath(); g.ellipse(0, SH * .55, W * (.95 + w * .05), SH * .5, 0, Math.PI * 1.08, Math.PI * 1.92); g.stroke() }
+      g.restore();
+    }
     let ground = p.kind === 'ice' ? mix(p.palette[0], [.9, .95, 1], .55) : p.palette[0];
     if (i.life === '植物' || (i.atm === '宜居' && i.life !== '无')) ground = mix(ground, [.2, .5, .2], .35);
     if (p.home) ground = [.3, .5, .28];   // 地球的大地是绿色的（贴图的蓝色是海洋）
@@ -256,13 +262,15 @@ export function drawPlanetCard(p, stars, W = 480, H = 640) {
   ];
   if (ex) {
     rows.push([['半径', `${ph.earthR} R⊕`, tg('size')], ['质量', `${ph.earthM} M⊕`, tg('mass')]]);
-    rows.push([['轨道', `${+ph.au.toPrecision(3)} AU`, tg('orbit')], ph.periodDays >= 1000 ? ['周期', `${(ph.periodDays / 365.25).toFixed(1)} 年`, tg('orbit')] : ['周期', `${+ph.periodDays.toPrecision(3)} 天`, tg('orbit')]]);
+    const eccTxt = real && p.ecc != null ? `  e ${+p.ecc.toPrecision(2)}` : null;   // 偏心率：假设或各来源矛盾的显示成推测（黄色）
+    rows.push([['轨道', `${+ph.au.toPrecision(3)} AU`, tg('orbit'), eccTxt && [eccTxt, p.src.ecc ?? tg('orbit')]], ph.periodDays >= 1000 ? ['周期', `${(ph.periodDays / 365.25).toFixed(1)} 年`, tg('orbit')] : ['周期', `${+ph.periodDays.toPrecision(3)} 天`, tg('orbit')]]);
   }
   const y0 = SH + (rows.length > 4 ? 94 : 100), dy = rows.length > 4 ? 26 : 28;
   const item = (it, x, y) => {   // it = [名称, 数值, 来源标签]：名称统一用浅蓝灰色，只有数值按来源上色
     if (!it) return; g.font = '15px "Microsoft YaHei",monospace';
     g.fillStyle = '#b8c7e0'; const lw = g.measureText(it[0] + ' ').width; g.fillText(it[0], x, y);
     g.fillStyle = it[2] ? TAG_COL[it[2]] : '#b8c7e0'; g.fillText(it[1], x + lw, y);
+    if (it[3]) { g.fillStyle = TAG_COL[it[3][1]]; g.fillText(it[3][0], x + lw + g.measureText(it[1]).width, y) }   // 数值后面再接一小段（偏心率），颜色单独按来源
   };
   rows.forEach((r, k) => { item(r[0], 24, y0 + k * dy); item(r[1], W / 2 + 10, y0 + k * dy) });
   {   // 右下角图例
@@ -350,7 +358,7 @@ export function drawSysPanorama(sys, stars, planets, snapIds, meta, W = 800, H =
       const gr = g.createRadialGradient(x - pr * .35, y - pr * .35, pr * .1, x, y, pr); gr.addColorStop(0, css(p.palette[1])); gr.addColorStop(1, css(p.palette[0]));
       if (p.glow) { g.fillStyle = css(p.glow, .3); g.beginPath(); g.arc(x, y, pr * 1.9, 0, 6.283); g.fill() }
       g.fillStyle = gr; g.beginPath(); g.arc(x, y, pr, 0, 6.283); g.fill();
-      if (p.ring) { g.strokeStyle = 'rgba(230,215,170,.8)'; g.lineWidth = 2; g.beginPath(); g.ellipse(x, y, pr * 1.8, pr * .5, -.25 - roll, 0, 6.283); g.stroke() }
+      if (p.ring) { g.strokeStyle = p.ringFaint ? 'rgba(230,215,170,.3)' : 'rgba(230,215,170,.8)'; g.lineWidth = p.ringFaint ? 1 : 2; g.beginPath(); g.ellipse(x, y, pr * 1.8, pr * .5, -.25 - roll, 0, 6.283); g.stroke() }
       g.fillStyle = '#dfe9ff'; g.font = '11px "Microsoft YaHei",sans-serif'; g.fillText(p.name, x, y + pr + 13);
     } else {
       g.strokeStyle = 'rgba(160,190,230,.55)'; g.lineWidth = 1.2; g.setLineDash([2, 3]); g.beginPath(); g.arc(x, y, pr, 0, 6.283); g.stroke(); g.setLineDash([]);

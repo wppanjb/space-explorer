@@ -5,6 +5,7 @@
 //   实测 = 来自天文观测（NASA 行星资料表 https://nssdc.gsfc.nasa.gov/planetary/factsheet/ ）
 //   推测 = 由已知数据估算
 //   生成 = 游戏自己定的（资源、样本价值、地表示意图、压缩后的轨道/大小等）
+// 2026-11-25 重新对照 NASA 行星资料表查证；每一项的出处见 sources.js。
 // 游戏里的距离和大小是「压缩」过的示意比例：dist = 30 × √AU，radius 为游戏单位。
 // =====================================================================
 import { makeRng } from './rng.js';
@@ -16,7 +17,8 @@ const DEG = Math.PI / 180;
 const RARE = ['晶体', '稀土', '氦-3'];
 
 // 太阳系。ecc/inc/tilt 都是实测值（inc、tilt 单位：度）；au = 半长轴；
-// radius = 游戏里的显示大小（压缩）；knownMoons = 已知卫星数（NASA 行星资料表，会随新发现增加）
+// radius = 游戏里的显示大小（压缩）；knownMoons = 已知卫星数（NASA Space Place，2026-04 ～ 2026-07，会随新发现增加）
+// ring = 有环；ringFaint = 环很暗很淡（木星、天王星、海王星；NASA 行星资料表：四颗巨行星都有环）
 // 游戏里实际画出的卫星数按 shownMoons() 缩小，卡片上写真实数量
 export const SOL = {
   sysName: 'Sol',            // 星系名（IAU 名称，即太阳）
@@ -32,18 +34,19 @@ export const SOL = {
       palette: [[.18, .38, .75], [.25, .6, .33]], atm: '宜居', temp: 15, g: 1.0, res: '水冰', life: '动物' },
     { name: '火星', kind: 'rock', au: 1.524, ecc: .094, inc: 1.8, tilt: 25.2, radius: 1.3, knownMoons: 2, ring: false,
       palette: [[.7, .34, .2], [.86, .56, .36]], atm: '稀薄', temp: -65, g: .38, res: '水冰', life: '无' },
-    { name: '木星', kind: 'gas', au: 5.204, ecc: .049, inc: 1.3, tilt: 3.1, radius: 6.0, knownMoons: 95, ring: false,
+    { name: '木星', kind: 'gas', au: 5.204, ecc: .049, inc: 1.3, tilt: 3.1, radius: 6.0, knownMoons: 115, ring: true, ringFaint: true,
       palette: [[.78, .6, .44], [.94, .86, .74]], atm: '浓厚（氢氦）', temp: -110, g: 2.36, res: '氢气', life: '无' },
-    { name: '土星', kind: 'gas', au: 9.572, ecc: .052, inc: 2.5, tilt: 26.7, radius: 5.2, knownMoons: 274, ring: true,
+    { name: '土星', kind: 'gas', au: 9.572, ecc: .052, inc: 2.5, tilt: 26.7, radius: 5.2, knownMoons: 293, ring: true,
       palette: [[.85, .75, .5], [.94, .88, .7]], atm: '浓厚（氢氦）', temp: -140, g: .92, res: '氦-3', life: '无' },
-    { name: '天王星', kind: 'ice', au: 19.16, ecc: .047, inc: .8, tilt: 97.8, radius: 3.6, knownMoons: 28, ring: false,
+    { name: '天王星', kind: 'ice', au: 19.16, ecc: .047, inc: .8, tilt: 97.8, radius: 3.6, knownMoons: 29, ring: true, ringFaint: true,
       palette: [[.5, .8, .84], [.7, .9, .93]], atm: '浓厚（氢氦）', temp: -195, g: .89, res: '甲烷冰', life: '无' },
-    { name: '海王星', kind: 'ice', au: 30.18, ecc: .010, inc: 1.8, tilt: 28.3, radius: 3.5, knownMoons: 16, ring: false,
+    { name: '海王星', kind: 'ice', au: 30.18, ecc: .010, inc: 1.8, tilt: 28.3, radius: 3.5, knownMoons: 16, ring: true, ringFaint: true,
       palette: [[.22, .38, .86], [.4, .56, .96]], atm: '浓厚（氢氦）', temp: -200, g: 1.12, res: '水冰', life: '无' },
   ],
 };
 
 // 实测的物理数据（NASA 行星资料表）：[半径 R⊕, 质量 M⊕, 公转周期（天）]，卡片上显示
+// 巨行星的周期是恒星周期（资料表另列 4331 / 10,747 / 30,589 / 59,800 天，定义不同）
 const PHYS = {
   '水星': [0.383, 0.0553, 88.0],
   '金星': [0.949, 0.815, 224.7],
@@ -69,7 +72,7 @@ export function buildSolPlanets(sys) {
     return {
       idx: i, id: sys.i + ':' + i, name: d.name, kind: d.kind, radius, dist,
       period: Math.pow(dist, 1.5) * .06, phase: R.uni(0, 6.283), palette: d.palette,
-      ring: d.ring, moons: shownMoons(d.knownMoons), knownMoons: d.knownMoons, tilt: d.tilt * DEG, seed: R.int(1, 1e6),
+      ring: d.ring, ringFaint: !!d.ringFaint, moons: shownMoons(d.knownMoons), knownMoons: d.knownMoons, tilt: d.tilt * DEG, seed: R.int(1, 1e6),
       ecc: d.ecc, inc: d.inc * DEG, node: R.uni(0, 6.283), dir: 1,
       au: d.au, periodDays: PHYS[d.name][2], earthR: PHYS[d.name][0], earthM: PHYS[d.name][1],   // 卡片上显示的半径 / 质量 / 轨道 / 周期（实测）
       home: !!d.home,   // 出发点：不可扫描、始终已知
