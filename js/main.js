@@ -427,6 +427,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true; did[e.code] = true; if (e.code === 'NumpadEnter') did.Enter = true;
   if (e.code === 'Escape') { if (!$('cardbig').classList.contains('hidden')) { $('cardbig').classList.add('hidden'); return } if (openP) closePanel(); return };
   if (e.code === 'KeyB') toggleBloom();
+  if (e.code === 'KeyT') toggleOrbits();
   if (e.code === 'KeyM') openPanel('map');
   if (e.code === 'KeyJ') openPanel('journal');
   if (e.code === 'KeyU') openPanel('upg');
@@ -465,6 +466,20 @@ function setBloom(v, notify) {
 }
 function toggleBloom() { setBloom(!bloomOn, true) }
 $('bloomChk').onchange = e => setBloom(e.target.checked, false);
+
+// 行星轨道开关（记住选择）
+let orbitsOn = true;
+try { orbitsOn = localStorage.getItem('deepspace-orbits') !== 'off' } catch { }
+$('orbitsChk').checked = orbitsOn;
+function setOrbits(v, notify) {
+  orbitsOn = v; $('orbitsChk').checked = v;
+  try { localStorage.setItem('deepspace-orbits', v ? 'on' : 'off') } catch { }
+  if (notify) toast(T.toast.orbits(v));
+}
+function toggleOrbits() {
+  setOrbits(!orbitsOn, true);
+}
+$('orbitsChk').onchange = e => setOrbits(e.target.checked, false);
 
 // ===== 游戏知识：第一次遇到时弹出 =====
 const KNOW = T.know;
@@ -1589,7 +1604,7 @@ function update(dt) {
       s.light.position.copy(s.mesh.position);
       s.light.intensity = full ? s.base : 0;
     }
-    for (const o of L.orbits) o.visible = full;
+    for (const o of L.orbits) o.visible = full && orbitsOn;
     if (L.belt) L.belt.visible = full;
     for (const b of L.beacons) {
       tV.copy(b.local).add(L.sys.pos); b.d = tV.distanceTo(ship.pos);

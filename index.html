@@ -55,7 +55,7 @@
       <div class="bar" id="energyBar"><i></i></div>
       速度 <span id="speedTxt" style="float:right">0 u/s</span>
     </div>
-    <div id="br">M 星图 · J 日志 · U 升级 · H 帮助 · K 收藏 · I 货舱 · L 知识库</div>
+    <div id="br">M 星图 · J 日志 · U 升级 · K 收藏 · I 货舱 · L 知识库 · B 辉光 · T 行星轨道 · H 帮助</div>
     <div id="reticle"><svg viewBox="0 0 80 80">
         <circle cx="40" cy="40" r="26" />
         <circle id="ring" cx="40" cy="40" r="26" transform="rotate(-90 40 40)" />
@@ -93,8 +93,8 @@
       <br>
       <!-- <p class="hint2">首次游玩会有逐步的新手提示，不用先背操作。</p> -->
       <p><label><input type="checkbox" id="tutChk"> 新手教学（游戏中按 <b style="color:var(--c2)">H</b> 随时查看全部操作与说明)</label></p>
-      <p><label><input type="checkbox" id="bloomChk"> 辉光效果（游戏中按 <b style="color:var(--c2)">B</b> 随时开关；关闭可提升性能）</label>
-      </p>
+      <p><label><input type="checkbox" id="bloomChk"> 辉光效果（游戏中按 <b style="color:var(--c2)">B</b> 随时开关；关闭可提升性能）</label></p>
+      <p><label><input type="checkbox" id="orbitsChk"> 行星轨道（游戏中按 <b style="color:var(--c2)">T</b> 随时开关）</label></p>
       <div class="row"><button id="btnStart">开始探险</button><button id="btnNew">🎲 新的银河</button></div>
       <p class="hint" id="saveHint"></p>
     </div>
@@ -243,6 +243,10 @@
             <td>B</td>
             <td>开关辉光效果</td>
           </tr>
+          <tr>
+            <td>T</td>
+            <td>显示 / 隐藏行星轨道线</td>
+          </tr>          
         </table>
       </div>
       <div id="tabGuide" class="pane hidden">
