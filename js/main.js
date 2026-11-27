@@ -605,7 +605,7 @@ let bigList = [], bigI = 0;
 function showBig(i) {
   bigI = (i + bigList.length) % bigList.length;
   const im = bigList[bigI];
-  $('cardimg').src = im.src; $('cardDl').href = im.src; $('cardDl').download = im.alt + '.png';
+  $('cardimg').src = im.src;
   $('cardIdx').textContent = T.cards.index(bigI + 1, bigList.length) + ' · ' + (im.classList.contains('unsent') ? T.tx.tagUnsent : T.tx.tagSent);
   $('cardbig').classList.remove('hidden');
 }
@@ -760,27 +760,30 @@ function renderCards() {
   $('ctabs').querySelectorAll('button[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === cardTab));
   $('panoSort').style.display = cardTab === 'pano' ? '' : 'none';
   $('cflt').parentElement.style.display = cardTab === 'pano' ? 'none' : ''; $('cgrid').classList.toggle('pano', cardTab === 'pano');
-  if (cardTab === 'pano') {
-    const list = panoOrder();
-    $('cgrid').innerHTML = list.length ? list.map(i => H.cardImgHtml(panoURL(i), systems[i].name + ' 全景', sent.panos[i] !== panos[i].t)).join('') : H.emptyHtml(T.pano.empty);
-    const imgs = [...$('cgrid').querySelectorAll('img')]; imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) }); return;
-  }
+if (cardTab === 'pano') {
+  const list = panoOrder();
+  $('cgrid').innerHTML = list.length ? list.map(i => H.cardImgHtml(panoURL(i), systems[i].name + ' 全景', sent.panos[i] !== panos[i].t)).join('') : H.emptyHtml(T.pano.empty);
+  const imgs = [...$('cgrid').querySelectorAll('img')]; imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) }); return;
+}
   // 出发点（地球）一开始就已知，卡片自动收藏，但不计入「已发现」的行星数
   const homeIds = genPlanets(systems[0]).filter(p => p.home).map(p => p.id);
   const ids = [...new Set([...discovered, ...homeIds])].sort((a, b) => { const [s1, p1] = a.split(':').map(Number), [s2, p2] = b.split(':').map(Number); return s1 - s2 || p1 - p2 });
+  const planetOf = id => { const [si, pi] = id.split(':').map(Number); return genPlanets(systems[si])[pi] };
+const isLife = id => { const p = planetOf(id); return !p.home && p.info.life !== '无' };
   const bySys = new Map(); ids.forEach(id => { const s = +id.split(':')[0]; bySys.set(s, (bySys.get(s) || 0) + (homeIds.includes(id) ? 0 : 1)) });
   $('cflt').innerHTML = [
     H.optionHtml('all', T.cards.all(ids.length)),
     H.optionHtml('cur', T.cards.current(curSysI >= 0 ? systems[curSysI].name : '')),
+    H.optionHtml('life', T.cards.life(ids.filter(isLife).length)),
     ...[...bySys].sort((a, b) => systems[a[0]].name.localeCompare(systems[b[0]].name, 'en', { numeric: true, sensitivity: 'base' })).map(([s, n]) => H.optionHtml(s, T.cards.system(systems[s].name, n, systems[s].nPlanets)))
   ].join('');
   $('cflt').value = cardFilter;
-  const want = cardFilter === 'all' ? null : cardFilter === 'cur' ? curSysI : +cardFilter;
-  const show = want === null ? ids : ids.filter(id => +id.split(':')[0] === want);
+  const want = cardFilter === 'all' || cardFilter === 'life' ? null : cardFilter === 'cur' ? curSysI : +cardFilter;
+const show = cardFilter === 'life' ? ids.filter(isLife) : want === null ? ids : ids.filter(id => +id.split(':')[0] === want);
   $('cgrid').innerHTML = show.length ? show.map(id => {
     const [si, pi] = id.split(':').map(Number), p = genPlanets(systems[si])[pi];
     return H.cardImgHtml(cardURL(p), p.name, !homeIds.includes(id) && !sent.cards.has(id))
-  }).join('') : H.emptyHtml(want === null ? T.cards.emptyAll : want === -1 ? T.cards.emptyNoSys : T.cards.emptySys);
+  }).join('') : H.emptyHtml(cardFilter === 'life' ? T.cards.emptyLife : want === null ? T.cards.emptyAll : want === -1 ? T.cards.emptyNoSys : T.cards.emptySys);
   const imgs = [...$('cgrid').querySelectorAll('img')];
   imgs.forEach((im, i) => im.onclick = () => { bigList = imgs; showBig(i) });
 }
